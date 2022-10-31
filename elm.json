@@ -1,0 +1,18 @@
+{
+    "type": "package",
+    "name": "billstclair/elm-dynamodb",
+    "summary": "elm-dynamodb is a pure Elm client library for Amazon's DynamoDB service.",
+    "license": "MIT",
+    "version": "1.0.0",
+    "exposed-modules": [
+        "DynamoDB"
+    ],
+    "elm-version": "0.19.0 <= v < 0.20.0",
+    "dependencies": {
+        "elm/core": "1.0.0 <= v < 2.0.0",
+        "elm/http": "2.0.0 <= v < 3.0.0",
+        "elm/json": "1.1.3 <= v < 2.0.0",
+        "the-sett/elm-aws-core": "9.0.0 <= v < 10.0.0"
+    },
+    "test-dependencies": {}
+}
