@@ -12,6 +12,7 @@
 
 module DynamoDB.Types exposing
     ( Error(..), Account
+    , AttributeValue(..), Item
     , Query, QueryElement(..)
     )
 
@@ -21,12 +22,14 @@ module DynamoDB.Types exposing
 # Types
 
 @docs Error, Account
+@docs AttributeValue, Item
 @docs Query, QueryElement
 
 -}
 
 import AWS.Http
 import AWS.Service as Service exposing (Service)
+import Dict exposing (Dict)
 import Http
 
 
@@ -66,6 +69,30 @@ type alias TableName =
 -}
 type alias Mimetype =
     String
+
+
+{-| A value in a database key or item.
+
+See: <https://docs.aws.amazon.com/amazondynamodb/latest/APIReference/API_AttributeValue.html>
+
+-}
+type AttributeValue
+    = BinaryValue String -- B
+    | BoolValue Bool -- BOOL
+    | BinarySetValue (List String) -- BS
+    | ListValue (List AttributeValue) -- L
+    | MapValue (Dict String AttributeValue) -- M
+    | NumberValue Float -- N
+    | NumberSetValue (List Float) -- NS
+    | NullValue -- NULL
+    | StringValue String -- S
+    | StringSetValue (List String) -- SS
+
+
+{-| An item in a database key or value.
+-}
+type alias Item =
+    Dict String AttributeValue
 
 
 {-| An element of a `Query`, used for HTTP headers and query parameters.

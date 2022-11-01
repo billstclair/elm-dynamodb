@@ -2,7 +2,7 @@
 --
 -- DynamoDB.elm
 -- Elm client library for Amazon's DynamoDB NoSql database service.
--- Copyright (c) 2021 Bill St. Clair <billstclair@gmail.com>
+-- Copyright (c) 2022 Bill St. Clair <billstclair@gmail.com>
 -- Some rights reserved.
 -- Distributed under the MIT License
 -- See LICENSE.txt
@@ -13,6 +13,7 @@
 module DynamoDB exposing
     ( Request
     , send
+    , readAccounts, decodeAccounts, accountDecoder, encodeAccount
     )
 
 {-| Pure Elm client for the [AWS DynamoDB](https://aws.amazon.com/dynamodb/) NoSQL database service.
@@ -28,7 +29,9 @@ module DynamoDB exposing
 @docs send
 
 
-# Creating S3 requests
+# Creating DynamoDB requests
+
+@docs getItem, putItem
 
 
 # Creating Body values
