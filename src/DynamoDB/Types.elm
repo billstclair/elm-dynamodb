@@ -11,7 +11,8 @@
 
 
 module DynamoDB.Types exposing
-    ( Error(..), Account
+    ( TableName
+    , Error(..), Account
     , Key(..), Item, AttributeValue(..)
     , Query, QueryElement(..)
     )
@@ -21,6 +22,7 @@ module DynamoDB.Types exposing
 
 # Types
 
+@docs TableName
 @docs Error, Account
 @docs Key, Item, AttributeValue
 @docs Query, QueryElement
@@ -55,7 +57,7 @@ type alias Account =
     , region : Maybe String
     , accessKey : String
     , secretKey : String
-    , table : TableName
+    , tableName : TableName
     }
 
 

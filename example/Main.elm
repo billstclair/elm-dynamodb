@@ -14,11 +14,15 @@ module Main exposing (..)
 
 import Browser
 import Dict exposing (Dict)
-import DynamoDB exposing (readAccounts)
+import DynamoDB exposing (getItem, readAccounts)
+import DynamoDB.EncodeDecode as ED
 import DynamoDB.Types
     exposing
         ( Account
+        , AttributeValue(..)
         , Error(..)
+        , Item
+        , Key(..)
         , QueryElement(..)
         )
 import Html
@@ -26,7 +30,6 @@ import Html
         ( Attribute
         , Html
         , a
-        , br
         , button
         , div
         , h2
@@ -58,7 +61,8 @@ import Html.Attributes
         , value
         )
 import Html.Events exposing (on, onClick, onInput, targetValue)
-import Json.Decode as JD
+import Json.Decode as JD exposing (Decoder)
+import Json.Encode as JE exposing (Value)
 import List.Extra as LE
 import Task
 
@@ -76,31 +80,20 @@ type alias Model =
     { display : String
     , accounts : List Account
     , account : Account
-    , table : String
-    , key : String
-    , secondaryKey : String
+    , key : Key
     , text : String
-    , mimetype : String
     , headers : List ( String, String )
     }
 
 
 type Msg
     = SetAccount String
-    | ReceiveAccounts (Result Error (List Account))
-    | ReceiveGetObject (Result Error ( String, Dict String String ))
-    | SetTable String
-    | ListBucket
-    | SetKey String
-    | SetSecondaryKey String
-    | GetItem
-    | GetKey String
+    | SetKeyName String
+    | SetKeyValue String
     | SetText String
-    | SetMimetype String
-    | PutObject
-    | ReceivePutObject (Result Error String)
-    | DeleteObject
-    | ReceiveDeleteObject (Result Error String)
+    | GetItem
+    | ReceiveGetItem (Result Error (Maybe Item))
+    | ReceiveAccounts (Result Error (List Account))
 
 
 init : () -> ( Model, Cmd Msg )
@@ -108,11 +101,8 @@ init _ =
     ( { display = "Fetching accounts..."
       , accounts = []
       , account = defaultAccount
-      , table = "no table"
-      , key = ""
-      , secondaryKey = ""
+      , key = SimpleKey ( "key", StringValue "test" )
       , text = ""
-      , mimetype = "plain"
       , headers = []
       }
     , Task.attempt ReceiveAccounts (readAccounts Nothing)
@@ -121,27 +111,9 @@ init _ =
 
 getItem : Model -> Cmd Msg
 getItem model =
-    S3.getObjectWithHeaders model.bucket model.key
-        |> S3.send model.account
-        |> Task.attempt ReceiveGetObject
-
-
-putObject : Model -> Cmd Msg
-putObject model =
-    let
-        body =
-            S3.stringBody ("text/" ++ model.mimetype ++ "; charset=utf-8") model.text
-    in
-    S3.putPublicObject model.bucket model.key body
-        |> S3.send model.account
-        |> Task.attempt ReceivePutObject
-
-
-deleteObject : Model -> Cmd Msg
-deleteObject model =
-    S3.deleteObject model.bucket model.key
-        |> S3.send model.account
-        |> Task.attempt ReceiveDeleteObject
+    DynamoDB.getItem model.account.tableName model.key
+        |> DynamoDB.send model.account
+        |> Task.attempt ReceiveGetItem
 
 
 defaultAccount : Account
@@ -150,8 +122,7 @@ defaultAccount =
     , region = Nothing
     , accessKey = ""
     , secretKey = ""
-    , buckets = [ "No bucket" ]
-    , isDigitalOcean = False
+    , tableName = "No table"
     }
 
 
@@ -177,125 +148,93 @@ update msg model =
             let
                 account =
                     findAccount model name
-
-                bucket =
-                    case account.buckets of
-                        b :: _ ->
-                            b
-
-                        _ ->
-                            "No bucket"
             in
             ( { model
                 | account = account
-                , bucket = bucket
                 , display = "Account: " ++ name
               }
             , Cmd.none
             )
 
-        SetBucket bucket ->
-            ( { model | bucket = bucket }
-            , Cmd.none
-            )
+        SetKeyName name ->
+            let
+                key =
+                    case model.key of
+                        SimpleKey ( k, v ) ->
+                            SimpleKey ( name, v )
 
-        ListBucket ->
-            ( { model | display = "Getting bucket listing..." }
-            , listBucket model
-            )
-
-        SetKey key ->
+                        x ->
+                            x
+            in
             ( { model | key = key }
             , Cmd.none
             )
 
-        GetObject ->
-            if model.key == "" then
+        SetKeyValue value ->
+            let
+                key =
+                    case model.key of
+                        SimpleKey ( k, v ) ->
+                            SimpleKey ( k, StringValue value )
+
+                        x ->
+                            x
+            in
+            ( { model | key = key }
+            , Cmd.none
+            )
+
+        GetItem ->
+            let
+                name =
+                    case model.key of
+                        SimpleKey ( n, _ ) ->
+                            n
+
+                        _ ->
+                            ""
+            in
+            if name == "" then
                 ( { model | display = "Blank key." }
                 , Cmd.none
                 )
 
             else
-                ( { model | display = "Fetching " ++ model.key ++ "..." }
-                , getObject model
+                ( { model | display = "Fetching " ++ keyToString model.key ++ "..." }
+                , getItem model
                 )
 
-        ReceiveGetObject result ->
+        ReceiveGetItem result ->
             case result of
                 Err err ->
                     ( { model | display = Debug.toString err }
                     , Cmd.none
                     )
 
-                Ok ( res, headers ) ->
-                    ( { model
-                        | display = "Got " ++ model.key
-                        , text = res
-                        , headers = Dict.toList headers
-                      }
+                Ok res ->
+                    ( case res of
+                        Just item ->
+                            let
+                                i =
+                                    Debug.log "item" item
+                            in
+                            { model
+                                | display = "Got: " ++ keyToString model.key
+                                , text = ED.encodeItem item |> JE.encode 2
+                            }
+
+                        Nothing ->
+                            { model
+                                | display = "No value for: " ++ keyToString model.key
+                                , text = ""
+                            }
                     , Cmd.none
                     )
-
-        GetKey key ->
-            ( { model | key = key }
-            , Task.perform (\_ -> GetObject) <| Task.succeed ()
-            )
 
         SetText text ->
             ( { model | text = text }
             , Cmd.none
             )
-
-        SetMimetype mimetype ->
-            ( { model | mimetype = mimetype }
-            , Cmd.none
-            )
-
-        PutObject ->
-            if model.key == "" then
-                ( { model | display = "Blank key." }
-                , Cmd.none
-                )
-
-            else
-                ( { model | display = "Writing " ++ model.key ++ "..." }
-                , putObject model
-                )
-
-        ReceivePutObject result ->
-            case result of
-                Err err ->
-                    ( { model | display = Debug.toString err }
-                    , Cmd.none
-                    )
-
-                Ok res ->
-                    ( { model | display = "Put " ++ model.key }
-                    , Cmd.none
-                    )
-
-        DeleteObject ->
-            if model.key == "" then
-                ( { model | display = "Blank key." }
-                , Cmd.none
-                )
-
-            else
-                ( { model | display = "Deleting " ++ model.key ++ "..." }
-                , deleteObject model
-                )
-
-        ReceiveDeleteObject result ->
-            case result of
-                Err err ->
-                    ( { model | display = Debug.toString err }
-                    , Cmd.none
-                    )
-
-                Ok res ->
-                    ( { model | display = "Deleted " ++ model.key }
-                    , Cmd.none
-                    )
 
         ReceiveAccounts result ->
             case result of
@@ -317,17 +256,45 @@ update msg model =
                     ( { model
                         | accounts = accounts
                         , account = account
-                        , bucket =
-                            case account.buckets of
-                                b :: _ ->
-                                    b
-
-                                _ ->
-                                    "No bucket"
                         , display = "Accounts received."
                       }
                     , Cmd.none
                     )
+
+
+keyToString : Key -> String
+keyToString key =
+    JE.encode 0 <| ED.encodeKey key
+
+
+primaryKeyName : Key -> String
+primaryKeyName key =
+    case key of
+        SimpleKey ( name, _ ) ->
+            name
+
+        CompositeKey ( name, _ ) _ ->
+            name
+
+
+attributeValueToString : AttributeValue -> String
+attributeValueToString value =
+    case value of
+        StringValue s ->
+            s
+
+        _ ->
+            JE.encode 0 <| ED.encodeAttributeValue value
+
+
+primaryKeyValue : Key -> String
+primaryKeyValue key =
+    case key of
+        SimpleKey ( _, value ) ->
+            attributeValueToString value
+
+        CompositeKey ( _, value ) _ ->
+            attributeValueToString value
 
 
 view : Model -> Html Msg
@@ -341,59 +308,38 @@ view model =
             , accountSelector model
             ]
         , p []
-            [ text "Bucket: "
-            , bucketSelector model
-            , text " "
-            , button [ onClick ListBucket ]
-                [ text "List Bucket" ]
+            [ text "Table Name: "
+            , text model.account.tableName
             ]
         , p []
-            [ text "Key: "
+            [ text "Key name: "
             , input
                 [ type_ "text"
                 , size 40
-                , value model.key
-                , onInput SetKey
+                , value <| primaryKeyName model.key
+                , onInput SetKeyName
                 ]
                 []
-            , text " "
-            , button [ onClick GetObject ]
-                [ text "Get" ]
-            , text " "
-            , button [ onClick DeleteObject ]
-                [ text "Delete" ]
-            ]
-        , p []
-            [ text "URL: "
-            , let
-                request =
-                    S3.getObject model.bucket model.key
-
-                url =
-                    S3.requestUrl model.account request
-              in
-              text url
-            ]
-        , p []
-            [ input
-                [ type_ "radio"
-                , name "mimetype"
-                , onClick (SetMimetype "plain")
-                , checked <| model.mimetype == "plain"
-                ]
-                []
-            , text " plain "
+            , br
+            , text "Key value: "
             , input
-                [ type_ "radio"
-                , name "mimetype"
-                , onClick (SetMimetype "html")
-                , checked <| model.mimetype == "html"
+                [ type_ "text"
+                , size 40
+                , value <| primaryKeyValue model.key
+                , onInput SetKeyValue
                 ]
                 []
-            , text " html "
-            , button [ onClick PutObject ]
-                [ text "Put" ]
+            , br
+            , button [ onClick GetItem ]
+                [ text "GetItem" ]
             ]
+
+        {-
+           , p []
+               [ button [ onClick PutItem ]
+                   [ text "PutItem" ]
+               ]
+        -}
         , p []
             [ textarea
                 [ cols 80
@@ -410,6 +356,11 @@ view model =
         ]
 
 
+br : Html Msg
+br =
+    Html.br [] []
+
+
 accountSelector : Model -> Html Msg
 accountSelector model =
     select [ on "change" (JD.map SetAccount targetValue) ]
@@ -423,21 +374,6 @@ accountOption model account =
         , selected (model.account.name == account.name)
         ]
         [ text account.name ]
-
-
-bucketSelector : Model -> Html Msg
-bucketSelector model =
-    select [ on "change" (JD.map SetBucket targetValue) ]
-        (List.map (bucketOption model) model.account.buckets)
-
-
-bucketOption : Model -> String -> Html Msg
-bucketOption model bucket =
-    option
-        [ value bucket
-        , selected (model.bucket == bucket)
-        ]
-        [ text bucket ]
 
 
 thText : String -> Html Msg

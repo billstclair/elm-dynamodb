@@ -122,10 +122,10 @@ encodeAttributeValue value =
             JE.object [ ( "M", JE.dict identity encodeAttributeValue dict ) ]
 
         NumberValue float ->
-            JE.object [ ( "N", JE.float float ) ]
+            JE.object [ ( "N", JE.string <| String.fromFloat float ) ]
 
         NumberSetValue floats ->
-            JE.object [ ( "NS", JE.list JE.float floats ) ]
+            JE.object [ ( "NS", JE.list JE.string (List.map String.fromFloat floats) ) ]
 
         NullValue ->
             JE.object [ ( "NULL", JE.bool True ) ]
@@ -166,6 +166,20 @@ applyDecoder tag decoder value =
             JD.fail <| JD.errorToString err
 
 
+floatStringDecoder : Decoder Float
+floatStringDecoder =
+    JD.string
+        |> JD.andThen
+            (\s ->
+                case String.toFloat s of
+                    Just f ->
+                        JD.succeed f
+
+                    Nothing ->
+                        JD.fail <| "malformed float: " ++ s
+            )
+
+
 {-| Decoder for an `AttributeValue`
 -}
 attributeValueDecoder : Decoder AttributeValue
@@ -198,10 +212,12 @@ attributeValueDecoder =
                                     value
 
                             "N" ->
-                                applyDecoder NumberValue JD.float value
+                                applyDecoder NumberValue floatStringDecoder value
 
                             "NS" ->
-                                applyDecoder NumberSetValue (JD.list JD.float) value
+                                applyDecoder NumberSetValue
+                                    (JD.list floatStringDecoder)
+                                    value
 
                             "NULL" ->
                                 JD.succeed NullValue

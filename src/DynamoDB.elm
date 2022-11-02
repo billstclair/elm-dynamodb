@@ -81,6 +81,7 @@ import DynamoDB.Types as Types
         , Key
         , Query
         , QueryElement(..)
+        , TableName
         )
 import Http exposing (Metadata)
 import Json.Decode as JD exposing (Decoder)
@@ -99,13 +100,13 @@ If `Nothing` is passed for the first arg (the URL), will use the default of `"ac
 
 You're not going to want to store the secret keys in this JSON in plain text anywhere but your development machine. In applications, they will ususally be stored in `LocalStorage`.
 
-Example JSON (the `table` is used only by the example code):
+Example JSON:
 
     [{"name": "Dynamo DB",
       "region": "us-east-1",
       "access-key": "<20-character access key>",
       "secret-key": "<40-character secret key>",
-      "table": "<your table name>"
+      "tableName": "<your table name>"
      }
     ]
 
@@ -194,7 +195,7 @@ encodeAccount account =
                     [ ( "region", JE.string region ) ]
             , [ ( "access-key", JE.string account.accessKey )
               , ( "secret-key", JE.string account.secretKey )
-              , ( "table", JE.string account.table )
+              , ( "tableName", JE.string account.tableName )
               ]
             ]
 
@@ -212,7 +213,7 @@ accountDecoder =
         )
         (JD.field "access-key" JD.string)
         (JD.field "secret-key" JD.string)
-        (JD.field "table" JD.string)
+        (JD.field "tableName" JD.string)
 
 
 accountsDecoder : Decoder (List Account)
@@ -232,9 +233,9 @@ decodeAccounts json =
             Ok accounts
 
 
-awsEndpointPrefix : String
-awsEndpointPrefix =
-    "dynamodb"
+endpointPrefix : String
+endpointPrefix =
+    "DynamoDB"
 
 
 apiVersion : Config.ApiVersion
@@ -255,21 +256,21 @@ Sometimes useful for the `hostResolver`.
 makeService : Account -> Service
 makeService { region } =
     let
+        -- If this is not lower-case, we get a signing scope error.
         prefix =
-            awsEndpointPrefix
+            String.toLower endpointPrefix
 
-        service =
-            case region of
-                Nothing ->
-                    Service.service <|
+        config =
+            Config.withTargetPrefix (endpointPrefix ++ "_" ++ apiVersion) <|
+                case region of
+                    Nothing ->
                         Config.defineGlobal
                             prefix
                             apiVersion
                             protocol
                             Config.SignV4
 
-                Just reg ->
-                    Service.service <|
+                    Just reg ->
                         Config.defineRegional
                             prefix
                             apiVersion
@@ -277,7 +278,7 @@ makeService { region } =
                             Config.SignV4
                             reg
     in
-    service
+    Service.service config
 
 
 {-| A request that can be turned into a Task by `DynamoDB.send`.
@@ -289,11 +290,25 @@ type alias Request a =
     AWS.Http.Request AWSAppError a
 
 
+getItemDecoder : Decoder (Maybe Item)
+getItemDecoder =
+    JD.maybe (JD.field "Item" JD.value)
+        |> JD.andThen
+            (\_ -> JD.map Just <| JD.field "Item" ED.itemDecoder)
+
+
 {-| Get an item from a table.
 -}
-getItem : Account -> Key -> Request Item
-getItem account key =
-    makeRequest "getItem" (ED.encodeKey key) ED.itemDecoder
+getItem : TableName -> Key -> Request (Maybe Item)
+getItem tableName key =
+    let
+        payload =
+            JE.object
+                [ ( "TableName", JE.string tableName )
+                , ( "Key", ED.encodeKey key )
+                ]
+    in
+    makeRequest "GetItem" payload getItemDecoder
 
 
 {-| Create a `Task` to send a signed request over the wire.
@@ -371,7 +386,7 @@ uses `AWS.Http.awsAppErrDecoder` as the `ErrorDecoder`.
 makeRequest : String -> Value -> Decoder a -> Request a
 makeRequest name value decoder =
     AWS.Http.request name
-        PUT
+        POST
         "/"
         (AWS.Http.jsonBody value)
         (AWS.Http.jsonBodyDecoder decoder)
@@ -380,19 +395,3 @@ makeRequest name value decoder =
 
 
 --- TODO: Requests
-
-
-{-| Return the URL string for a request.
--}
-requestUrl : Account -> Request a -> String
-requestUrl account request =
-    let
-        { hostResolver, endpoint, endpointPrefix } =
-            makeService account
-
-        host =
-            hostResolver endpoint endpointPrefix
-    in
-    "https://"
-        ++ host
-        ++ request.path
