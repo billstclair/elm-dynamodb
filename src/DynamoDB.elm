@@ -12,6 +12,7 @@
 
 module DynamoDB exposing
     ( Request
+    , getItem
     , send
     , readAccounts, decodeAccounts, accountDecoder, encodeAccount
     )
@@ -22,6 +23,11 @@ module DynamoDB exposing
 # Types
 
 @docs Request
+
+
+# Creating requests
+
+@docs getItem
 
 
 # Turning a Request into a Task
@@ -62,14 +68,23 @@ import AWS.Http
         , Method(..)
         , Path
         , emptyBody
-        , request
         )
 import AWS.Service as Service exposing (Service)
 import Dict exposing (Dict)
-import DynamoDB.Types as Types exposing (Account, Error(..), Query, QueryElement(..))
+import DynamoDB.EncodeDecode as ED
+import DynamoDB.Types as Types
+    exposing
+        ( Account
+        , AttributeValue
+        , Error(..)
+        , Item
+        , Key
+        , Query
+        , QueryElement(..)
+        )
 import Http exposing (Metadata)
 import Json.Decode as JD exposing (Decoder)
-import Json.Encode as JE
+import Json.Encode as JE exposing (Value)
 import Task exposing (Task)
 
 
@@ -229,7 +244,7 @@ apiVersion =
 
 protocol : Config.Protocol
 protocol =
-    Config.REST_XML
+    Config.JSON
 
 
 {-| Make an `AWS.Service.Service` for a `DynamoDB.Account`.
@@ -241,7 +256,6 @@ makeService : Account -> Service
 makeService { region } =
     let
         prefix =
-            -- Changed by `send` to the bucket for Digital Ocean.
             awsEndpointPrefix
 
         service =
@@ -266,13 +280,20 @@ makeService { region } =
     service
 
 
-{-| A request that can be turned into a Task by `S3.send`.
+{-| A request that can be turned into a Task by `DynamoDB.send`.
 
-`a` is the type of the successful `Task` result from `S3.send`.
+`a` is the type of the successful `Task` result from `DynamoDB.send`.
 
 -}
 type alias Request a =
     AWS.Http.Request AWSAppError a
+
+
+{-| Get an item from a table.
+-}
+getItem : Account -> Key -> Request Item
+getItem account key =
+    makeRequest "getItem" (ED.encodeKey key) ED.itemDecoder
 
 
 {-| Create a `Task` to send a signed request over the wire.
@@ -343,37 +364,18 @@ addQuery query req =
 
 {-| Low-level request creator.
 
-    stringRequest : String -> Method -> Path -> Body -> Request String
-    stringRequest method url body =
-        parserRequest
-            name
-            method
-            url
-            body
-            (identity >> Ok)
-            Task.succeed
+Similar to`AWS.Http.request`, but assumes the HTTP result is JSON and
+uses `AWS.Http.awsAppErrDecoder` as the `ErrorDecoder`.
 
 -}
-parserRequest : String -> Method -> Path -> Body -> (String -> Result String a) -> Request a
-parserRequest name method path body parser =
-    request name
-        method
-        path
-        body
-        (AWS.Http.stringBodyDecoder parser)
+makeRequest : String -> Value -> Decoder a -> Request a
+makeRequest name value decoder =
+    AWS.Http.request name
+        PUT
+        "/"
+        (AWS.Http.jsonBody value)
+        (AWS.Http.jsonBodyDecoder decoder)
         AWS.Http.awsAppErrDecoder
-
-
-{-| Create a `Request` that returns its response body as a string.
-
-    getObject : String -> Method -> Request String
-    getObject bucket key =
-        stringRequest "operation" GET (objectPath bucket key) emptyBody
-
--}
-stringRequest : String -> Method -> Path -> Body -> Request String
-stringRequest name method path body =
-    parserRequest name method path body (identity >> Ok)
 
 
 
@@ -394,58 +396,3 @@ requestUrl account request =
     "https://"
         ++ host
         ++ request.path
-
-
-{-| Read an object and process the entire Http Response.
--}
-getFullObject : String -> String -> (Metadata -> String -> Result String a) -> Request a
-getFullObject bucket key parser =
-    request "getFullObject"
-        GET
-        (objectPath bucket key)
-        emptyBody
-        parser
-        AWS.Http.awsAppErrDecoder
-
-
-{-| Turn a bucket and a key into an object path.
-
-    "/" ++ bucket ++ "/" ++ key
-
--}
-objectPath : String -> String -> String
-objectPath bucket key =
-    "/" ++ bucket ++ "/" ++ key
-
-
-responseHeaders : Metadata -> String -> Result String ( String, Dict String String )
-responseHeaders metadata body =
-    Ok <| ( body, metadata.headers )
-
-
-{-| Read an object with its HTTP response headers.
--}
-getObjectWithHeaders : String -> String -> Request ( String, Dict String String )
-getObjectWithHeaders bucket key =
-    getFullObject bucket
-        key
-        responseHeaders
-
-
-responseHeadersOnly : Metadata -> String -> Result String (Dict String String)
-responseHeadersOnly metadata body =
-    case responseHeaders metadata body of
-        Ok ( _, headers ) ->
-            Ok headers
-
-        Err e ->
-            Err e
-
-
-{-| Do a HEAD request to get only an object's headers.
--}
-getHeaders : String -> String -> Request (Dict String String)
-getHeaders bucket key =
-    getFullObject bucket
-        key
-        responseHeadersOnly

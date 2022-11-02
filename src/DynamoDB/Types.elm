@@ -12,7 +12,7 @@
 
 module DynamoDB.Types exposing
     ( Error(..), Account
-    , AttributeValue(..), Item
+    , Key(..), Item, AttributeValue(..)
     , Query, QueryElement(..)
     )
 
@@ -22,7 +22,7 @@ module DynamoDB.Types exposing
 # Types
 
 @docs Error, Account
-@docs AttributeValue, Item
+@docs Key, Item, AttributeValue
 @docs Query, QueryElement
 
 -}
@@ -89,7 +89,14 @@ type AttributeValue
     | StringSetValue (List String) -- SS
 
 
-{-| An item in a database key or value.
+{-| A key for a database item.
+-}
+type Key
+    = SimpleKey ( String, AttributeValue )
+    | CompositeKey ( String, AttributeValue ) ( String, AttributeValue )
+
+
+{-| An item in a database.
 -}
 type alias Item =
     Dict String AttributeValue
