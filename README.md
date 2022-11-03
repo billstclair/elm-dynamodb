@@ -1,6 +1,6 @@
 [![elm-package](https://img.shields.io/badge/elm-1.0.0-blue.svg)](http://package.elm-lang.org/packages/billstclair/elm-dynamodb/latest)
 
-A pure-Elm client for the [Amazon DynamoDB](https://aws.amazon.com/dynamodb/) NoSQL database service. It targets a subset of the entire service API.
+A pure-Elm client for the [Amazon DynamoDB](https://aws.amazon.com/dynamodb/) NoSQL database service. It targets a subset of the service API. Use `DynamoDB.makeRequest` to add more.
 
 # Example
 

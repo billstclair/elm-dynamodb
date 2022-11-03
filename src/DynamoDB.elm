@@ -12,12 +12,14 @@
 
 module DynamoDB exposing
     ( Request
-    , getItem, getFullItem
-    , putItem, putFullItem
+    , getItem, getItemWithMetadata
+    , putItem, putItemWithMetadata
+    , deleteItem, deleteItemWithMetadata
     , send
     , itemStringValue, itemFloatValue, itemIntValue
     , removeKeyFields
     , readAccounts, decodeAccounts, accountDecoder, encodeAccount
+    , makeRequest, makeFullRequest
     )
 
 {-| Pure Elm client for the [AWS DynamoDB](https://aws.amazon.com/dynamodb/) NoSQL database service.
@@ -30,8 +32,9 @@ module DynamoDB exposing
 
 # Creating requests
 
-@docs getItem, getFullItem
-@docs putItem, putFullItem
+@docs getItem, getItemWithMetadata
+@docs putItem, putItemWithMetadata
+@docs deleteItem, deleteItemWithMetadata
 
 
 # Turning a Request into a Task
@@ -55,6 +58,8 @@ module DynamoDB exposing
 
 
 # Low-level functions
+
+@docs makeRequest, makeFullRequest
 
 -}
 
@@ -293,8 +298,8 @@ type alias Request a =
     AWS.Http.Request AWSAppError a
 
 
-getFullItemDecoder : a -> Decoder ( a, Maybe Item )
-getFullItemDecoder metadata =
+getItemWithMetadataDecoder : a -> Decoder ( a, Maybe Item )
+getItemWithMetadataDecoder metadata =
     JD.maybe (JD.field "Item" JD.value)
         |> JD.andThen
             (\value ->
@@ -313,7 +318,7 @@ getFullItemDecoder metadata =
 
 getItemDecoder : Metadata -> Decoder (Maybe Item)
 getItemDecoder metadata =
-    getFullItemDecoder metadata
+    getItemWithMetadataDecoder metadata
         |> JD.andThen
             (\( _, item ) -> JD.succeed item)
 
@@ -327,9 +332,9 @@ getItem =
 
 {-| Get an item, returning the Http request `Metadata`.
 -}
-getFullItem : TableName -> Key -> Request ( Metadata, Maybe Item )
-getFullItem =
-    getItemInternal getFullItemDecoder
+getItemWithMetadata : TableName -> Key -> Request ( Metadata, Maybe Item )
+getItemWithMetadata =
+    getItemInternal getItemWithMetadataDecoder
 
 
 getItemInternal : (Metadata -> Decoder a) -> TableName -> Key -> Request a
@@ -344,13 +349,13 @@ getItemInternal decoder tableName key =
     makeFullRequest "GetItem" payload decoder
 
 
-putFullItemDecoder : a -> Decoder ( a, () )
-putFullItemDecoder metadata =
-    JD.succeed ( metadata, () )
+voidWithMetadataDecoder : a -> Decoder a
+voidWithMetadataDecoder metadata =
+    JD.succeed metadata
 
 
-putItemDecoder : a -> Decoder ()
-putItemDecoder _ =
+voidDecoder : a -> Decoder ()
+voidDecoder _ =
     JD.succeed ()
 
 
@@ -358,14 +363,14 @@ putItemDecoder _ =
 -}
 putItem : TableName -> Key -> Item -> Request ()
 putItem =
-    putItemInternal putItemDecoder
+    putItemInternal voidDecoder
 
 
 {-| Put an item into a table, returning the Http request `Metadata`.
 -}
-putFullItem : TableName -> Key -> Item -> Request ( Metadata, () )
-putFullItem =
-    putItemInternal putFullItemDecoder
+putItemWithMetadata : TableName -> Key -> Item -> Request Metadata
+putItemWithMetadata =
+    putItemInternal voidWithMetadataDecoder
 
 
 putItemInternal : (Metadata -> Decoder a) -> TableName -> Key -> Item -> Request a
@@ -378,6 +383,32 @@ putItemInternal decoder tableName key item =
                 ]
     in
     makeFullRequest "PutItem" payload decoder
+
+
+{-| Delete an item from a table. There is no return value.
+-}
+deleteItem : TableName -> Key -> Request ()
+deleteItem =
+    deleteItemInternal voidDecoder
+
+
+{-| Delete an item from a table, returning the Http request `Metadata`.
+-}
+deleteItemWithMetadata : TableName -> Key -> Request Metadata
+deleteItemWithMetadata =
+    deleteItemInternal voidWithMetadataDecoder
+
+
+deleteItemInternal : (Metadata -> Decoder a) -> TableName -> Key -> Request a
+deleteItemInternal decoder tableName key =
+    let
+        payload =
+            JE.object
+                [ ( "TableName", JE.string tableName )
+                , ( "Key", ED.encodeKey key )
+                ]
+    in
+    makeFullRequest "DeleteItem" payload decoder
 
 
 {-| Add key fields to an `Item`.
@@ -446,7 +477,7 @@ itemIntValue string item =
 
 {-| Remove the key fields from an `Item`.
 
-The `Item` that comes back from `getItem` or `getFullItem` contains the key fields. Sometimes you'd rather not see them there.
+The `Item` that comes back from `getItem` or `getItemWithMetadata` contains the key fields. Sometimes you'd rather not see them there.
 
 -}
 removeKeyFields : Key -> Item -> Item

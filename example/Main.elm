@@ -94,9 +94,11 @@ type Msg
     | SetKeyValue String
     | SetText String
     | GetItem
-    | ReceiveGetItem Key (Result Error ( Metadata, Maybe Item ))
     | PutItem
-    | ReceivePutItem Key (Result Error ( Metadata, () ))
+    | DeleteItem
+    | ReceiveGetItem Key (Result Error ( Metadata, Maybe Item ))
+    | ReceivePutItem Key (Result Error Metadata)
+    | ReceiveDeleteItem Key (Result Error Metadata)
     | ReceiveAccounts (Result Error (List Account))
 
 
@@ -116,43 +118,67 @@ init _ =
 
 getItem : Model -> ( Model, Cmd Msg )
 getItem model =
-    ( { model
-        | item = Nothing
-        , text = ""
-        , metadata = Nothing
-      }
-    , DynamoDB.getFullItem model.account.tableName model.key
-        |> DynamoDB.send model.account
-        |> Task.attempt (ReceiveGetItem model.key)
-    )
+    checkKey model
+        (\() ->
+            ( { model
+                | display =
+                    "Fetching " ++ keyToString model.key ++ "..."
+                , item = Nothing
+                , text = ""
+                , metadata = Nothing
+              }
+            , DynamoDB.getItemWithMetadata model.account.tableName model.key
+                |> DynamoDB.send model.account
+                |> Task.attempt (ReceiveGetItem model.key)
+            )
+        )
 
 
 putItem : Model -> ( Model, Cmd Msg )
 putItem model =
-    let
-        mdl =
-            { model
-                | item = Nothing
-                , metadata = Nothing
-            }
-    in
-    case JD.decodeString ED.itemDecoder mdl.text of
-        Err err ->
-            ( { mdl
-                | display = "Encode error: " ++ Debug.toString err
-              }
-            , Cmd.none
-            )
+    checkKey model
+        (\() ->
+            let
+                mdl =
+                    { model
+                        | item = Nothing
+                        , metadata = Nothing
+                    }
+            in
+            case JD.decodeString ED.itemDecoder mdl.text of
+                Err err ->
+                    ( { mdl
+                        | display = "Encode error: " ++ Debug.toString err
+                      }
+                    , Cmd.none
+                    )
 
-        Ok item ->
-            ( { mdl
-                | item = Just item
-                , text = ED.encodeItem item |> JE.encode 2
+                Ok item ->
+                    ( { mdl
+                        | display = "Putting " ++ keyToString model.key ++ "..."
+                        , item = Just item
+                        , text = ED.encodeItem item |> JE.encode 2
+                      }
+                    , DynamoDB.putItemWithMetadata model.account.tableName model.key item
+                        |> DynamoDB.send model.account
+                        |> Task.attempt (ReceivePutItem model.key)
+                    )
+        )
+
+
+deleteItem : Model -> ( Model, Cmd Msg )
+deleteItem model =
+    checkKey model
+        (\() ->
+            ( { model
+                | display = "Deleting " ++ keyToString model.key ++ "..."
+                , metadata = Nothing
               }
-            , DynamoDB.putFullItem model.account.tableName model.key item
+            , DynamoDB.deleteItemWithMetadata model.account.tableName model.key
                 |> DynamoDB.send model.account
-                |> Task.attempt (ReceivePutItem model.key)
+                |> Task.attempt (ReceiveDeleteItem model.key)
             )
+        )
 
 
 defaultAccount : Account
@@ -218,49 +244,19 @@ update msg model =
             , Cmd.none
             )
 
+        SetText text ->
+            ( { model | text = text }
+            , Cmd.none
+            )
+
         GetItem ->
-            let
-                name =
-                    case model.key of
-                        SimpleKey ( n, _ ) ->
-                            n
+            getItem model
 
-                        _ ->
-                            ""
-            in
-            if name == "" then
-                ( { model | display = "Blank key." }
-                , Cmd.none
-                )
-
-            else
-                getItem
-                    { model
-                        | display =
-                            "Fetching " ++ keyToString model.key ++ "..."
-                    }
+        DeleteItem ->
+            deleteItem model
 
         PutItem ->
-            let
-                name =
-                    case model.key of
-                        SimpleKey ( n, _ ) ->
-                            n
-
-                        _ ->
-                            ""
-            in
-            if name == "" then
-                ( { model | display = "Blank key." }
-                , Cmd.none
-                )
-
-            else
-                putItem
-                    { model
-                        | display =
-                            "Putting " ++ keyToString model.key ++ "..."
-                    }
+            putItem model
 
         ReceiveGetItem key result ->
             case result of
@@ -269,17 +265,14 @@ update msg model =
                     , Cmd.none
                     )
 
-                Ok ( metadata, res ) ->
+                Ok ( metadata, maybeItem ) ->
                     let
                         mdl =
                             { model | metadata = Just metadata }
                     in
-                    ( case res of
+                    ( case maybeItem of
                         Just item ->
                             let
-                                i =
-                                    Debug.log "item" item
-
                                 item2 =
                                     DynamoDB.removeKeyFields key item
                             in
@@ -299,27 +292,10 @@ update msg model =
                     )
 
         ReceivePutItem key result ->
-            case result of
-                Err err ->
-                    ( { model | display = Debug.toString err }
-                    , Cmd.none
-                    )
+            receiveEmptyResult "Put" (Just key) result model
 
-                Ok ( metadata, _ ) ->
-                    let
-                        mdl =
-                            { model | metadata = Just metadata }
-                    in
-                    ( { mdl
-                        | display = "Put: " ++ keyToString key
-                      }
-                    , Cmd.none
-                    )
-
-        SetText text ->
-            ( { model | text = text }
-            , Cmd.none
-            )
+        ReceiveDeleteItem key result ->
+            receiveEmptyResult "Deleted" (Just key) result model
 
         ReceiveAccounts result ->
             case result of
@@ -345,6 +321,52 @@ update msg model =
                       }
                     , Cmd.none
                     )
+
+
+checkKey : Model -> (() -> ( Model, Cmd Msg )) -> ( Model, Cmd Msg )
+checkKey model thunk =
+    let
+        name =
+            case model.key of
+                SimpleKey ( n, _ ) ->
+                    n
+
+                _ ->
+                    ""
+    in
+    if name == "" then
+        ( { model | display = "Blank key." }
+        , Cmd.none
+        )
+
+    else
+        thunk ()
+
+
+receiveEmptyResult : String -> Maybe Key -> Result Error Metadata -> Model -> ( Model, Cmd Msg )
+receiveEmptyResult label maybeKey result model =
+    case result of
+        Err err ->
+            ( { model | display = Debug.toString err }
+            , Cmd.none
+            )
+
+        Ok metadata ->
+            let
+                mdl =
+                    { model | metadata = Just metadata }
+            in
+            ( { mdl
+                | display =
+                    case maybeKey of
+                        Nothing ->
+                            label
+
+                        Just key ->
+                            label ++ ":" ++ keyToString key
+              }
+            , Cmd.none
+            )
 
 
 keyToString : Key -> String
@@ -413,20 +435,14 @@ view model =
                 , onInput SetKeyValue
                 ]
                 []
-            , br
-            , button [ onClick GetItem ]
+            ]
+        , p []
+            [ button [ onClick GetItem ]
                 [ text "GetItem" ]
             , text " "
-            , button [ onClick PutItem ]
-                [ text "PutItem" ]
+            , button [ onClick DeleteItem ]
+                [ text "DeleteItem" ]
             ]
-
-        {-
-           , p []
-               [ button [ onClick PutItem ]
-                   [ text "PutItem" ]
-               ]
-        -}
         , p []
             [ textarea
                 [ cols 80
@@ -436,6 +452,8 @@ view model =
                 ]
                 []
             ]
+        , button [ onClick PutItem ]
+            [ text "PutItem" ]
         , case model.item of
             Nothing ->
                 text ""
