@@ -13,6 +13,7 @@
 module DynamoDB exposing
     ( Request
     , getItem, getFullItem
+    , putItem, putFullItem
     , send
     , removeKeyFields
     , readAccounts, decodeAccounts, accountDecoder, encodeAccount
@@ -29,6 +30,7 @@ module DynamoDB exposing
 # Creating requests
 
 @docs getItem, getFullItem
+@docs putItem, putFullItem
 
 
 # Turning a Request into a Task
@@ -317,7 +319,7 @@ getItem =
     getItemInternal getItemDecoder
 
 
-{-| Get an item, with the Http request `Metadata`.
+{-| Get an item, returning the Http request `Metadata`.
 -}
 getFullItem : TableName -> Key -> Request ( Metadata, Maybe Item )
 getFullItem =
@@ -334,6 +336,55 @@ getItemInternal decoder tableName key =
                 ]
     in
     makeFullRequest "GetItem" payload decoder
+
+
+putFullItemDecoder : a -> Decoder ( a, () )
+putFullItemDecoder metadata =
+    JD.succeed ( metadata, () )
+
+
+putItemDecoder : a -> Decoder ()
+putItemDecoder _ =
+    JD.succeed ()
+
+
+{-| Put an item into a table. There is no return value.
+-}
+putItem : TableName -> Key -> Item -> Request ()
+putItem =
+    putItemInternal putItemDecoder
+
+
+{-| Put an item into a table, returning the Http request `Metadata`.
+-}
+putFullItem : TableName -> Key -> Item -> Request ( Metadata, () )
+putFullItem =
+    putItemInternal putFullItemDecoder
+
+
+putItemInternal : (Metadata -> Decoder a) -> TableName -> Key -> Item -> Request a
+putItemInternal decoder tableName key item =
+    let
+        payload =
+            JE.object
+                [ ( "TableName", JE.string tableName )
+                , ( "Item", addKeyFields key item |> ED.encodeItem )
+                ]
+    in
+    makeFullRequest "PutItem" payload decoder
+
+
+{-| Add key fields to an `Item`.
+-}
+addKeyFields : Key -> Item -> Item
+addKeyFields key item =
+    case key of
+        SimpleKey ( name, value ) ->
+            Dict.insert name value item
+
+        CompositeKey ( name1, value1 ) ( name2, value2 ) ->
+            Dict.insert name1 value1 item
+                |> Dict.insert name2 value2
 
 
 {-| Remove the key fields from an `Item`.

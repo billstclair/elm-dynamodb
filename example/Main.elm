@@ -95,6 +95,8 @@ type Msg
     | SetText String
     | GetItem
     | ReceiveGetItem Key (Result Error ( Metadata, Maybe Item ))
+    | PutItem
+    | ReceivePutItem Key (Result Error ( Metadata, () ))
     | ReceiveAccounts (Result Error (List Account))
 
 
@@ -123,6 +125,34 @@ getItem model =
         |> DynamoDB.send model.account
         |> Task.attempt (ReceiveGetItem model.key)
     )
+
+
+putItem : Model -> ( Model, Cmd Msg )
+putItem model =
+    let
+        mdl =
+            { model
+                | item = Nothing
+                , metadata = Nothing
+            }
+    in
+    case JD.decodeString ED.itemDecoder mdl.text of
+        Err err ->
+            ( { mdl
+                | display = "Encode error: " ++ Debug.toString err
+              }
+            , Cmd.none
+            )
+
+        Ok item ->
+            ( { mdl
+                | item = Just item
+                , text = ED.encodeItem item |> JE.encode 2
+              }
+            , DynamoDB.putFullItem model.account.tableName model.key item
+                |> DynamoDB.send model.account
+                |> Task.attempt (ReceivePutItem model.key)
+            )
 
 
 defaultAccount : Account
@@ -215,6 +245,28 @@ update msg model =
                             "Fetching " ++ keyToString model.key ++ "..."
                     }
 
+        PutItem ->
+            let
+                name =
+                    case model.key of
+                        SimpleKey ( n, _ ) ->
+                            n
+
+                        _ ->
+                            ""
+            in
+            if name == "" then
+                ( { model | display = "Blank key." }
+                , Cmd.none
+                )
+
+            else
+                putItem
+                    { model
+                        | display =
+                            "Putting " ++ keyToString model.key ++ "..."
+                    }
+
         ReceiveGetItem key result ->
             case result of
                 Err err ->
@@ -248,6 +300,24 @@ update msg model =
                                 , item = Nothing
                                 , text = ""
                             }
+                    , Cmd.none
+                    )
+
+        ReceivePutItem key result ->
+            case result of
+                Err err ->
+                    ( { model | display = Debug.toString err }
+                    , Cmd.none
+                    )
+
+                Ok ( metadata, _ ) ->
+                    let
+                        mdl =
+                            { model | metadata = Just metadata }
+                    in
+                    ( { mdl
+                        | display = "Put: " ++ keyToString key
+                      }
                     , Cmd.none
                     )
 
@@ -322,13 +392,12 @@ view model =
     div
         [ style "margin-left" "3em"
         ]
-        [ p [] [ text model.display ]
+        [ p [ style "color" "red" ] [ text model.display ]
         , p []
             [ text "Account: "
             , accountSelector model
-            ]
-        , p []
-            [ text "Table Name: "
+            , br
+            , text "Table Name: "
             , text model.account.tableName
             ]
         , p []
@@ -352,6 +421,9 @@ view model =
             , br
             , button [ onClick GetItem ]
                 [ text "GetItem" ]
+            , text " "
+            , button [ onClick PutItem ]
+                [ text "PutItem" ]
             ]
 
         {-
@@ -384,7 +456,16 @@ view model =
 
             Just metadata ->
                 p []
-                    [ text "Headers: "
+                    [ text "URL: "
+                    , text metadata.url
+                    , br
+                    , text "statusCode: "
+                    , text <| String.fromInt metadata.statusCode
+                    , br
+                    , text "statusText: "
+                    , text metadata.statusText
+                    , br
+                    , text "Headers: "
                     , text <| Debug.toString (Dict.toList metadata.headers)
                     ]
         ]
