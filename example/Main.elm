@@ -14,7 +14,7 @@ module Main exposing (..)
 
 import Browser
 import Dict exposing (Dict)
-import DynamoDB exposing (getItem, readAccounts)
+import DynamoDB as DynamoDB
 import DynamoDB.EncodeDecode as ED
 import DynamoDB.Types
     exposing
@@ -61,6 +61,7 @@ import Html.Attributes
         , value
         )
 import Html.Events exposing (on, onClick, onInput, targetValue)
+import Http exposing (Metadata)
 import Json.Decode as JD exposing (Decoder)
 import Json.Encode as JE exposing (Value)
 import List.Extra as LE
@@ -81,8 +82,9 @@ type alias Model =
     , accounts : List Account
     , account : Account
     , key : Key
+    , item : Maybe Item
     , text : String
-    , headers : List ( String, String )
+    , metadata : Maybe Metadata
     }
 
 
@@ -92,7 +94,7 @@ type Msg
     | SetKeyValue String
     | SetText String
     | GetItem
-    | ReceiveGetItem (Result Error (Maybe Item))
+    | ReceiveGetItem Key (Result Error ( Metadata, Maybe Item ))
     | ReceiveAccounts (Result Error (List Account))
 
 
@@ -102,18 +104,25 @@ init _ =
       , accounts = []
       , account = defaultAccount
       , key = SimpleKey ( "key", StringValue "test" )
+      , item = Nothing
       , text = ""
-      , headers = []
+      , metadata = Nothing
       }
-    , Task.attempt ReceiveAccounts (readAccounts Nothing)
+    , Task.attempt ReceiveAccounts (DynamoDB.readAccounts Nothing)
     )
 
 
-getItem : Model -> Cmd Msg
+getItem : Model -> ( Model, Cmd Msg )
 getItem model =
-    DynamoDB.getItem model.account.tableName model.key
+    ( { model
+        | item = Nothing
+        , text = ""
+        , metadata = Nothing
+      }
+    , DynamoDB.getFullItem model.account.tableName model.key
         |> DynamoDB.send model.account
-        |> Task.attempt ReceiveGetItem
+        |> Task.attempt (ReceiveGetItem model.key)
+    )
 
 
 defaultAccount : Account
@@ -200,32 +209,43 @@ update msg model =
                 )
 
             else
-                ( { model | display = "Fetching " ++ keyToString model.key ++ "..." }
-                , getItem model
-                )
+                getItem
+                    { model
+                        | display =
+                            "Fetching " ++ keyToString model.key ++ "..."
+                    }
 
-        ReceiveGetItem result ->
+        ReceiveGetItem key result ->
             case result of
                 Err err ->
                     ( { model | display = Debug.toString err }
                     , Cmd.none
                     )
 
-                Ok res ->
+                Ok ( metadata, res ) ->
+                    let
+                        mdl =
+                            { model | metadata = Just metadata }
+                    in
                     ( case res of
                         Just item ->
                             let
                                 i =
                                     Debug.log "item" item
+
+                                item2 =
+                                    DynamoDB.removeKeyFields key item
                             in
-                            { model
-                                | display = "Got: " ++ keyToString model.key
-                                , text = ED.encodeItem item |> JE.encode 2
+                            { mdl
+                                | display = "Got: " ++ keyToString key
+                                , item = Just item2
+                                , text = ED.encodeItem item2 |> JE.encode 2
                             }
 
                         Nothing ->
-                            { model
-                                | display = "No value for: " ++ keyToString model.key
+                            { mdl
+                                | display = "No value for: " ++ keyToString key
+                                , item = Nothing
                                 , text = ""
                             }
                     , Cmd.none
@@ -349,10 +369,24 @@ view model =
                 ]
                 []
             ]
-        , p []
-            [ text "Headers: "
-            , text <| Debug.toString model.headers
-            ]
+        , case model.item of
+            Nothing ->
+                text ""
+
+            Just item ->
+                p []
+                    [ text "Item: "
+                    , text <| Debug.toString (Dict.toList item)
+                    ]
+        , case model.metadata of
+            Nothing ->
+                text ""
+
+            Just metadata ->
+                p []
+                    [ text "Headers: "
+                    , text <| Debug.toString (Dict.toList metadata.headers)
+                    ]
         ]
 
 

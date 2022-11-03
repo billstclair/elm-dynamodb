@@ -12,8 +12,9 @@
 
 module DynamoDB exposing
     ( Request
-    , getItem
+    , getItem, getFullItem
     , send
+    , removeKeyFields
     , readAccounts, decodeAccounts, accountDecoder, encodeAccount
     )
 
@@ -27,7 +28,7 @@ module DynamoDB exposing
 
 # Creating requests
 
-@docs getItem
+@docs getItem, getFullItem
 
 
 # Turning a Request into a Task
@@ -35,15 +36,9 @@ module DynamoDB exposing
 @docs send
 
 
-# Creating DynamoDB requests
+# Removing the keys from an item
 
-@docs getItem, putItem
-
-
-# Creating Body values
-
-
-# Adding queries and headers to a request
+@docs removeKeyFields
 
 
 # Reading accounts into Elm
@@ -78,7 +73,7 @@ import DynamoDB.Types as Types
         , AttributeValue
         , Error(..)
         , Item
-        , Key
+        , Key(..)
         , Query
         , QueryElement(..)
         , TableName
@@ -290,17 +285,47 @@ type alias Request a =
     AWS.Http.Request AWSAppError a
 
 
-getItemDecoder : Decoder (Maybe Item)
-getItemDecoder =
+getFullItemDecoder : a -> Decoder ( a, Maybe Item )
+getFullItemDecoder metadata =
     JD.maybe (JD.field "Item" JD.value)
         |> JD.andThen
-            (\_ -> JD.map Just <| JD.field "Item" ED.itemDecoder)
+            (\value ->
+                case value of
+                    Nothing ->
+                        JD.succeed ( metadata, Nothing )
+
+                    Just _ ->
+                        (JD.map Just <|
+                            JD.field "Item" ED.itemDecoder
+                        )
+                            |> JD.andThen
+                                (\item -> JD.succeed ( metadata, item ))
+            )
+
+
+getItemDecoder : Metadata -> Decoder (Maybe Item)
+getItemDecoder metadata =
+    getFullItemDecoder metadata
+        |> JD.andThen
+            (\( _, item ) -> JD.succeed item)
 
 
 {-| Get an item from a table.
 -}
 getItem : TableName -> Key -> Request (Maybe Item)
-getItem tableName key =
+getItem =
+    getItemInternal getItemDecoder
+
+
+{-| Get an item, with the Http request `Metadata`.
+-}
+getFullItem : TableName -> Key -> Request ( Metadata, Maybe Item )
+getFullItem =
+    getItemInternal getFullItemDecoder
+
+
+getItemInternal : (Metadata -> Decoder a) -> TableName -> Key -> Request a
+getItemInternal decoder tableName key =
     let
         payload =
             JE.object
@@ -308,7 +333,20 @@ getItem tableName key =
                 , ( "Key", ED.encodeKey key )
                 ]
     in
-    makeRequest "GetItem" payload getItemDecoder
+    makeFullRequest "GetItem" payload decoder
+
+
+{-| Remove the key fields from an `Item`.
+-}
+removeKeyFields : Key -> Item -> Item
+removeKeyFields key item =
+    case key of
+        SimpleKey ( name, _ ) ->
+            Dict.remove name item
+
+        CompositeKey ( name1, _ ) ( name2, _ ) ->
+            Dict.remove name1 item
+                |> Dict.remove name2
 
 
 {-| Create a `Task` to send a signed request over the wire.
@@ -390,6 +428,21 @@ makeRequest name value decoder =
         "/"
         (AWS.Http.jsonBody value)
         (AWS.Http.jsonBodyDecoder decoder)
+        AWS.Http.awsAppErrDecoder
+
+
+{-| Request creator with retained `Metadata`
+
+Same as `makeRequest`, but the decoder takes metadata
+
+-}
+makeFullRequest : String -> Value -> (Metadata -> Decoder a) -> Request a
+makeFullRequest name value decoder =
+    AWS.Http.request name
+        POST
+        "/"
+        (AWS.Http.jsonBody value)
+        (AWS.Http.jsonFullDecoder decoder)
         AWS.Http.awsAppErrDecoder
 
 
