@@ -48,6 +48,7 @@ import Html
 import Html.Attributes
     exposing
         ( checked
+        , class
         , cols
         , disabled
         , href
@@ -252,11 +253,11 @@ update msg model =
         GetItem ->
             getItem model
 
-        DeleteItem ->
-            deleteItem model
-
         PutItem ->
             putItem model
+
+        DeleteItem ->
+            deleteItem model
 
         ReceiveGetItem key result ->
             case result of
@@ -409,8 +410,7 @@ view model =
     div
         [ style "margin-left" "3em"
         ]
-        [ p [ style "color" "red" ] [ text model.display ]
-        , p []
+        [ p []
             [ text "Account: "
             , accountSelector model
             , br
