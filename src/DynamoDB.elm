@@ -15,6 +15,7 @@ module DynamoDB exposing
     , getItem, getFullItem
     , putItem, putFullItem
     , send
+    , itemStringValue, itemFloatValue, itemIntValue
     , removeKeyFields
     , readAccounts, decodeAccounts, accountDecoder, encodeAccount
     )
@@ -36,6 +37,11 @@ module DynamoDB exposing
 # Turning a Request into a Task
 
 @docs send
+
+
+# Accessing values in items
+
+@docs itemStringValue, itemFloatValue, itemIntValue
 
 
 # Removing the keys from an item
@@ -72,7 +78,7 @@ import DynamoDB.EncodeDecode as ED
 import DynamoDB.Types as Types
     exposing
         ( Account
-        , AttributeValue
+        , AttributeValue(..)
         , Error(..)
         , Item
         , Key(..)
@@ -387,7 +393,61 @@ addKeyFields key item =
                 |> Dict.insert name2 value2
 
 
+{-| Return the value of an item's string attribute.
+
+If the attribute does not exist or doesn't have a string value, return `""`.
+
+-}
+itemStringValue : String -> Item -> String
+itemStringValue key item =
+    case Dict.get key item of
+        Nothing ->
+            ""
+
+        Just attribute ->
+            case attribute of
+                StringValue s ->
+                    s
+
+                _ ->
+                    ""
+
+
+{-| Return the value of an item's float attribute.
+
+If the attribute does not exist or doesn't have a float value, return `NaN`.
+
+-}
+itemFloatValue : String -> Item -> Float
+itemFloatValue key item =
+    case Dict.get key item of
+        Nothing ->
+            0 / 0
+
+        Just attribute ->
+            case attribute of
+                NumberValue s ->
+                    s
+
+                _ ->
+                    0 / 0
+
+
+{-| Round an item's float value to an integer.
+
+If the attribute does not exist or doesn't have a float value, returns
+`NaN` as an integer, which can only be detected via `isNan (toFloat n)`.
+
+-}
+itemIntValue : String -> Item -> Int
+itemIntValue string item =
+    round <| itemFloatValue string item
+
+
 {-| Remove the key fields from an `Item`.
+
+The `Item` that comes back from `getItem` or `getFullItem` contains the key fields. Sometimes you'd rather not see them there.
+
 -}
 removeKeyFields : Key -> Item -> Item
 removeKeyFields key item =

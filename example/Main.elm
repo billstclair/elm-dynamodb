@@ -175,11 +175,6 @@ findAccount model name =
             a
 
 
-stringEqual : String -> String -> Bool
-stringEqual s1 s2 =
-    String.toLower s1 == String.toLower s2
-
-
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
