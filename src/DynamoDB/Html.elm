@@ -21,39 +21,19 @@ import Html
     exposing
         ( Attribute
         , Html
-        , a
-        , button
         , div
-        , h2
-        , input
-        , option
-        , p
-        , select
-        , span
         , table
         , td
         , text
-        , textarea
         , th
         , tr
         )
 import Html.Attributes
     exposing
-        ( checked
-        , class
-        , cols
-        , disabled
-        , href
-        , name
-        , rows
-        , selected
-        , size
-        , style
-        , target
-        , type_
+        ( class
         , value
         )
-import Html.Events exposing (onClick, onInput)
+import Html.Events exposing (onClick)
 import Set exposing (Set)
 
 
@@ -92,8 +72,8 @@ table.prettytable caption {
 }"""
 
 
-itemsColumns : List Item -> List String
-itemsColumns items =
+itemsColumnNames : List Item -> List String
+itemsColumnNames items =
     let
         outer item set =
             let
@@ -115,14 +95,16 @@ itemTable : (Item -> msg) -> List Item -> Html msg
 itemTable wrapper items =
     let
         columnNames =
-            itemsColumns items
+            itemsColumnNames items
     in
     div []
         [ styleElement []
             [ text prettytableStyle ]
         , table
             [ class "prettytable" ]
-            (List.map (\name -> th [] [ text name ]) columnNames
+            ([ tr [] <|
+                List.map (\name -> th [] [ text name ]) columnNames
+             ]
                 ++ List.map (itemRow wrapper columnNames) items
             )
         ]
@@ -131,17 +113,20 @@ itemTable wrapper items =
 itemRow : (Item -> msg) -> List String -> Item -> Html msg
 itemRow wrapper columnNames item =
     let
-        itemTh columnName =
-            case Dict.get columnName item of
-                Nothing ->
-                    text ""
+        itemTd columnName =
+            let
+                str =
+                    case Dict.get columnName item of
+                        Nothing ->
+                            ""
 
-                Just value ->
-                    th []
-                        [ text <| attributeValueToText value ]
+                        Just value ->
+                            attributeValueToText value
+            in
+            td [] [ text str ]
     in
     tr [ onClick <| wrapper item ] <|
-        List.map itemTh columnNames
+        List.map itemTd columnNames
 
 
 attributeValueToText : AttributeValue -> String
@@ -156,5 +141,6 @@ attributeValueToText value =
         NumberValue f ->
             String.fromFloat f
 
+        -- TODO: flesh out more of these
         _ ->
             Debug.toString value
