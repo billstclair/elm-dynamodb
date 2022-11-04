@@ -98,6 +98,7 @@ type Msg
     | SetKeyValue String
     | SetText String
     | SetLimit String
+    | ClearLastEvaluatedKey
     | ClickScanItem Item
     | GetItem
     | PutItem
@@ -351,6 +352,19 @@ update msg model =
             ( { model | limit = text }
             , Cmd.none
             )
+
+        ClearLastEvaluatedKey ->
+            case model.scanValue of
+                Nothing ->
+                    ( model, Cmd.none )
+
+                Just v ->
+                    ( { model
+                        | scanValue =
+                            Just { v | lastEvaluatedKey = Nothing }
+                      }
+                    , Cmd.none
+                    )
 
         ClickScanItem item ->
             let
@@ -614,6 +628,15 @@ view model =
                     , br
                     , text "lastEvaluatedKey: "
                     , text <| Debug.toString scanValue.lastEvaluatedKey
+                    , if scanValue.lastEvaluatedKey == Nothing then
+                        text " "
+
+                      else
+                        span []
+                            [ text " "
+                            , button [ onClick ClearLastEvaluatedKey ]
+                                [ text "Clear" ]
+                            ]
                     , renderItemTable ClickScanItem
                         (DynamoDB.keyNames model.key)
                         scanValue.items
