@@ -319,11 +319,16 @@ getItemWithMetadataDecoder metadata =
             )
 
 
+tossMetadataDecoder : a -> (a -> Decoder ( a, b )) -> Decoder b
+tossMetadataDecoder metadata decoder =
+    decoder metadata
+        |> JD.andThen
+            (\( _, v ) -> JD.succeed v)
+
+
 getItemDecoder : Metadata -> Decoder (Maybe Item)
 getItemDecoder metadata =
-    getItemWithMetadataDecoder metadata
-        |> JD.andThen
-            (\( _, item ) -> JD.succeed item)
+    tossMetadataDecoder metadata getItemWithMetadataDecoder
 
 
 {-| Get an item from a table.
@@ -589,6 +594,48 @@ projectionExpressionMap maybeKey maybeNames =
             ]
 
 
+
+-- Need to return the tableName with each item.
+-- Items can be missing. Handle and distinguish (List (Maybe Item)).
+-- DynamoDB can also return an empty object if none of the requested
+-- attributes are there, but we always ask for the key attributes;
+-- maybe we should remember them here, instead of making them go
+-- over the wire again.
+
+
+transactGetItemWithMetadataDecoder : a -> Decoder ( a, List Item )
+transactGetItemWithMetadataDecoder metadata =
+    JD.field "Responses"
+        (JD.list (JD.field "Item" ED.itemDecoder)
+            |> JD.andThen (\items -> JD.succeed ( metadata, items ))
+        )
+
+
+transactGetItemDecoder : a -> Decoder (List Item)
+transactGetItemDecoder metadata =
+    tossMetadataDecoder metadata transactGetItemWithMetadataDecoder
+
+
+{-| Do a bunch of GetItem requests inside a transaction.
+
+Will error if the list has more than ten elements.
+
+-}
+transactGetItem : List TransactGetItem -> Request (List Item)
+transactGetItem =
+    transactGetItemInternal transactGetItemDecoder
+
+
+{-| Do a bunch of GetItem requests inside a transaction, returning the Http request `Metadata`.
+
+Will error if the list has more than ten elements.
+
+-}
+transactGetItemWithMetadata : List TransactGetItem -> Request ( Metadata, List Item )
+transactGetItemWithMetadata =
+    transactGetItemInternal transactGetItemWithMetadataDecoder
+
+
 transactGetItemInternal : (Metadata -> Decoder a) -> List TransactGetItem -> Request a
 transactGetItemInternal decoder getItems =
     let
@@ -788,7 +835,3 @@ makeFullRequest name value decoder =
         (AWS.Http.jsonBody value)
         (AWS.Http.jsonFullDecoder decoder)
         AWS.Http.awsAppErrDecoder
-
-
-
---- TODO: Requests
