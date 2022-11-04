@@ -10,9 +10,12 @@
 ----------------------------------------------------------------------
 
 
-module DynamoDB.Html exposing (itemTable)
+module DynamoDB.Html exposing (renderItemTable)
 
 {-| A few HTML widgets to ease in displaying DynamoDB data.
+
+@docs renderItemTable
+
 -}
 
 import Dict exposing (Dict)
@@ -72,8 +75,8 @@ table.prettytable caption {
 }"""
 
 
-itemsColumnNames : List Item -> List String
-itemsColumnNames items =
+itemsColumnNames : List String -> List Item -> List String
+itemsColumnNames keyNames items =
     let
         outer item set =
             let
@@ -81,21 +84,33 @@ itemsColumnNames items =
                     Set.insert columnName s
             in
             List.foldr inner set <| Dict.keys item
+
+        deleter keyName list =
+            List.filter (\x -> x /= keyName) list
     in
     List.foldl outer Set.empty items
         |> Set.toList
+        |> (\list ->
+                List.concat
+                    [ keyNames
+                    , List.foldr deleter list keyNames
+                    ]
+           )
 
 
 {-| Render a table for a list of `Item`s.
 
+The list of strings is the key names which should appear first in the
+displayed table.
+
 The wrapper (`(Item -> msg)`) is called when the user clicks on a row.
 
 -}
-itemTable : (Item -> msg) -> List Item -> Html msg
-itemTable wrapper items =
+renderItemTable : (Item -> msg) -> List String -> List Item -> Html msg
+renderItemTable wrapper keyNames items =
     let
         columnNames =
-            itemsColumnNames items
+            itemsColumnNames keyNames items
     in
     div []
         [ styleElement []

@@ -15,9 +15,10 @@ module DynamoDB exposing
     , getItem, getItemWithMetadata
     , putItem, putItemWithMetadata
     , deleteItem, deleteItemWithMetadata
+    , scan, scanWithMetadata, ScanValue
     , send
     , itemStringValue, itemFloatValue, itemIntValue
-    , removeKeyFields
+    , removeKeyFields, keyNames
     , readAccounts, decodeAccounts, accountDecoder, encodeAccount
     , makeRequest, makeFullRequest
     )
@@ -35,6 +36,7 @@ module DynamoDB exposing
 @docs getItem, getItemWithMetadata
 @docs putItem, putItemWithMetadata
 @docs deleteItem, deleteItemWithMetadata
+@docs scan, scanWithMetadata, ScanValue
 
 
 # Turning a Request into a Task
@@ -47,9 +49,9 @@ module DynamoDB exposing
 @docs itemStringValue, itemFloatValue, itemIntValue
 
 
-# Removing the keys from an item
+# Utility functions
 
-@docs removeKeyFields
+@docs removeKeyFields, keyNames
 
 
 # Reading accounts into Elm
@@ -360,6 +362,9 @@ voidDecoder _ =
 
 
 {-| Put an item into a table. There is no return value.
+
+See <https://docs.aws.amazon.com/amazondynamodb/latest/APIReference/API_PutItem.html>
+
 -}
 putItem : TableName -> Key -> Item -> Request ()
 putItem =
@@ -386,6 +391,9 @@ putItemInternal decoder tableName key item =
 
 
 {-| Delete an item from a table. There is no return value.
+
+See <https://docs.aws.amazon.com/amazondynamodb/latest/APIReference/API_DeleteItem.html>
+
 -}
 deleteItem : TableName -> Key -> Request ()
 deleteItem =
@@ -409,6 +417,99 @@ deleteItemInternal decoder tableName key =
                 ]
     in
     makeFullRequest "DeleteItem" payload decoder
+
+
+{-| The return value for `scan` and `scanWithMetadata`
+
+Pass `lastEvaluatedKey` to a subsequent call to scan to get more.
+
+This doesn't include `ScannedCount`, because that's the same as
+`Count` unless you do filtering, which isn't yet supported.
+
+-}
+type alias ScanValue =
+    { count : Int
+    , items : List Item
+    , lastEvaluatedKey : Maybe Key
+    }
+
+
+scanWithMetadataDecoder : a -> Decoder ( a, Maybe ScanValue )
+scanWithMetadataDecoder metadata =
+    JD.maybe (JD.field "Items" JD.value)
+        |> JD.andThen
+            (\value ->
+                case value of
+                    Nothing ->
+                        JD.succeed ( metadata, Nothing )
+
+                    Just _ ->
+                        JD.map3 ScanValue
+                            (JD.field "Count" <| JD.int)
+                            (JD.field "Items" <| JD.list ED.itemDecoder)
+                            (JD.maybe <| JD.field "LastEvaluatedKey" ED.keyDecoder)
+                            |> JD.andThen
+                                (\res -> JD.succeed ( metadata, Just res ))
+            )
+
+
+scanDecoder : a -> Decoder (Maybe ScanValue)
+scanDecoder metadata =
+    scanWithMetadataDecoder metadata
+        |> JD.andThen
+            (\( _, value ) ->
+                JD.succeed value
+            )
+
+
+{-| Scan a table for items.
+
+If `Maybe Key` isn't `Nothing`, it's the `ExclusiveStartKey`.
+
+If `Maybe Int` isn't `Nothing`, it's the `Limit`.
+
+See <https://docs.aws.amazon.com/amazondynamodb/latest/APIReference/API_Scan.html>
+
+-}
+scan : TableName -> Maybe Key -> Maybe Int -> Request (Maybe ScanValue)
+scan =
+    scanInternal scanDecoder
+
+
+{-| Scan a table for items, returning the Http request `Metadata`.
+
+If `Maybe Key` isn't `Nothing`, it's the `ExclusiveStartKey`.
+
+If `Maybe Int` isn't `Nothing`, it's the `Limit`.
+
+-}
+scanWithMetadata : TableName -> Maybe Key -> Maybe Int -> Request ( Metadata, Maybe ScanValue )
+scanWithMetadata =
+    scanInternal scanWithMetadataDecoder
+
+
+scanInternal : (Metadata -> Decoder a) -> TableName -> Maybe Key -> Maybe Int -> Request a
+scanInternal decoder tableName maybeExclusiveStartKey maybeLimit =
+    let
+        payload =
+            JE.object <|
+                List.concat
+                    [ [ ( "TableName", JE.string tableName ) ]
+                    , case maybeExclusiveStartKey of
+                        Nothing ->
+                            []
+
+                        Just key ->
+                            [ ( "ExclusiveStartKey", ED.encodeKey key ) ]
+                    , case maybeLimit of
+                        Nothing ->
+                            []
+
+                        Just limit ->
+                            [ ( "Limit", JE.int limit ) ]
+                    ]
+    in
+    makeFullRequest "Scan" payload decoder
 
 
 {-| Add key fields to an `Item`.
@@ -489,6 +590,18 @@ removeKeyFields key item =
         CompositeKey ( name1, _ ) ( name2, _ ) ->
             Dict.remove name1 item
                 |> Dict.remove name2
+
+
+{-| Return a list of the key names in a `Key`.
+-}
+keyNames : Key -> List String
+keyNames key =
+    case key of
+        SimpleKey ( name, _ ) ->
+            [ name ]
+
+        CompositeKey ( name1, _ ) ( name2, _ ) ->
+            [ name1, name2 ]
 
 
 {-| Create a `Task` to send a signed request over the wire.

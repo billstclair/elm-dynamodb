@@ -14,8 +14,9 @@ module Main exposing (..)
 
 import Browser
 import Dict exposing (Dict)
-import DynamoDB as DynamoDB
+import DynamoDB exposing (ScanValue)
 import DynamoDB.EncodeDecode as ED
+import DynamoDB.Html exposing (renderItemTable)
 import DynamoDB.Types
     exposing
         ( Account
@@ -85,6 +86,8 @@ type alias Model =
     , key : Key
     , item : Maybe Item
     , text : String
+    , limit : String
+    , scanValue : Maybe ScanValue
     , metadata : Maybe Metadata
     }
 
@@ -94,12 +97,16 @@ type Msg
     | SetKeyName String
     | SetKeyValue String
     | SetText String
+    | SetLimit String
+    | ClickScanItem Item
     | GetItem
     | PutItem
     | DeleteItem
+    | Scan
     | ReceiveGetItem Key (Result Error ( Metadata, Maybe Item ))
     | ReceivePutItem Key (Result Error Metadata)
     | ReceiveDeleteItem Key (Result Error Metadata)
+    | ReceiveScan (Result Error ( Metadata, Maybe ScanValue ))
     | ReceiveAccounts (Result Error (List Account))
 
 
@@ -111,6 +118,8 @@ init _ =
       , key = SimpleKey ( "key", StringValue "test" )
       , item = Nothing
       , text = ""
+      , limit = ""
+      , scanValue = Nothing
       , metadata = Nothing
       }
     , Task.attempt ReceiveAccounts (DynamoDB.readAccounts Nothing)
@@ -133,6 +142,46 @@ getItem model =
                 |> Task.attempt (ReceiveGetItem model.key)
             )
         )
+
+
+itemToText : Item -> String
+itemToText item =
+    ED.encodeItem item |> JE.encode 2
+
+
+receiveGetItem : Key -> Result Error ( Metadata, Maybe Item ) -> Model -> ( Model, Cmd Msg )
+receiveGetItem key result model =
+    case result of
+        Err err ->
+            ( { model | display = Debug.toString err }
+            , Cmd.none
+            )
+
+        Ok ( metadata, maybeItem ) ->
+            let
+                mdl =
+                    { model | metadata = Just metadata }
+            in
+            ( case maybeItem of
+                Just item ->
+                    let
+                        item2 =
+                            DynamoDB.removeKeyFields key item
+                    in
+                    { mdl
+                        | display = "Got: " ++ keyToString key
+                        , item = Just item2
+                        , text = itemToText item2
+                    }
+
+                Nothing ->
+                    { mdl
+                        | display = "No value for: " ++ keyToString key
+                        , item = Nothing
+                        , text = ""
+                    }
+            , Cmd.none
+            )
 
 
 putItem : Model -> ( Model, Cmd Msg )
@@ -158,7 +207,7 @@ putItem model =
                     ( { mdl
                         | display = "Putting " ++ keyToString model.key ++ "..."
                         , item = Just item
-                        , text = ED.encodeItem item |> JE.encode 2
+                        , text = itemToText item
                       }
                     , DynamoDB.putItemWithMetadata model.account.tableName model.key item
                         |> DynamoDB.send model.account
@@ -180,6 +229,54 @@ deleteItem model =
                 |> Task.attempt (ReceiveDeleteItem model.key)
             )
         )
+
+
+scan : Model -> ( Model, Cmd Msg )
+scan model =
+    let
+        limit =
+            String.toInt model.limit
+    in
+    if model.limit /= "" && limit == Nothing then
+        ( { model | display = "Limit must be blank or an integer." }
+        , Cmd.none
+        )
+
+    else
+        ( { model
+            | display = "Scanning..."
+            , scanValue = Nothing
+          }
+        , let
+            lastEvaluatedKey =
+                case model.scanValue of
+                    Nothing ->
+                        Nothing
+
+                    Just scanValue ->
+                        scanValue.lastEvaluatedKey
+          in
+          DynamoDB.scanWithMetadata model.account.tableName lastEvaluatedKey limit
+            |> DynamoDB.send model.account
+            |> Task.attempt ReceiveScan
+        )
+
+
+receiveScan : Result Error ( Metadata, Maybe ScanValue ) -> Model -> ( Model, Cmd Msg )
+receiveScan result model =
+    case result of
+        Err err ->
+            ( { model | display = Debug.toString err }
+            , Cmd.none
+            )
+
+        Ok ( metadata, scanValue ) ->
+            ( { model
+                | display = "Scan successful."
+                , scanValue = scanValue
+              }
+            , Cmd.none
+            )
 
 
 defaultAccount : Account
@@ -250,6 +347,58 @@ update msg model =
             , Cmd.none
             )
 
+        SetLimit text ->
+            ( { model | limit = text }
+            , Cmd.none
+            )
+
+        ClickScanItem item ->
+            let
+                i =
+                    Debug.log "ClickScanItem" item
+
+                keyName =
+                    case model.key of
+                        SimpleKey ( name, _ ) ->
+                            name
+
+                        _ ->
+                            ""
+
+                mdl =
+                    { model
+                        | item = Nothing
+                        , text = ""
+                    }
+            in
+            if keyName == "" then
+                ( mdl, Cmd.none )
+
+            else
+                case Dict.get keyName item of
+                    Nothing ->
+                        ( mdl, Cmd.none )
+
+                    Just value ->
+                        case value of
+                            StringValue _ ->
+                                let
+                                    key =
+                                        SimpleKey ( keyName, value )
+                                in
+                                ( { mdl
+                                    | key = key
+                                    , item = Just item
+                                    , text =
+                                        DynamoDB.removeKeyFields key item
+                                            |> itemToText
+                                  }
+                                , Cmd.none
+                                )
+
+                            _ ->
+                                ( mdl, Cmd.none )
+
         GetItem ->
             getItem model
 
@@ -259,44 +408,20 @@ update msg model =
         DeleteItem ->
             deleteItem model
 
+        Scan ->
+            scan model
+
         ReceiveGetItem key result ->
-            case result of
-                Err err ->
-                    ( { model | display = Debug.toString err }
-                    , Cmd.none
-                    )
-
-                Ok ( metadata, maybeItem ) ->
-                    let
-                        mdl =
-                            { model | metadata = Just metadata }
-                    in
-                    ( case maybeItem of
-                        Just item ->
-                            let
-                                item2 =
-                                    DynamoDB.removeKeyFields key item
-                            in
-                            { mdl
-                                | display = "Got: " ++ keyToString key
-                                , item = Just item2
-                                , text = ED.encodeItem item2 |> JE.encode 2
-                            }
-
-                        Nothing ->
-                            { mdl
-                                | display = "No value for: " ++ keyToString key
-                                , item = Nothing
-                                , text = ""
-                            }
-                    , Cmd.none
-                    )
+            receiveGetItem key result model
 
         ReceivePutItem key result ->
             receiveEmptyResult "Put" (Just key) result model
 
         ReceiveDeleteItem key result ->
             receiveEmptyResult "Deleted" (Just key) result model
+
+        ReceiveScan result ->
+            receiveScan result model
 
         ReceiveAccounts result ->
             case result of
@@ -410,7 +535,9 @@ view model =
     div
         [ style "margin-left" "3em"
         ]
-        [ p []
+        [ p [ style "color" "red" ]
+            [ text model.display ]
+        , p []
             [ text "Account: "
             , accountSelector model
             , br
@@ -454,6 +581,19 @@ view model =
             ]
         , button [ onClick PutItem ]
             [ text "PutItem" ]
+        , p []
+            [ text "Limit: "
+            , input
+                [ type_ "text"
+                , size 5
+                , value model.limit
+                , onInput SetLimit
+                ]
+                []
+            , text " "
+            , button [ onClick Scan ]
+                [ text "Scan" ]
+            ]
         , case model.item of
             Nothing ->
                 text ""
@@ -462,6 +602,21 @@ view model =
                 p []
                     [ text "Item: "
                     , text <| Debug.toString (Dict.toList item)
+                    ]
+        , case model.scanValue of
+            Nothing ->
+                text ""
+
+            Just scanValue ->
+                p []
+                    [ text "scan count: "
+                    , text <| String.fromInt scanValue.count
+                    , br
+                    , text "lastEvaluatedKey: "
+                    , text <| Debug.toString scanValue.lastEvaluatedKey
+                    , renderItemTable ClickScanItem
+                        (DynamoDB.keyNames model.key)
+                        scanValue.items
                     ]
         , case model.metadata of
             Nothing ->

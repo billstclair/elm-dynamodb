@@ -2,6 +2,10 @@
 
 A pure-Elm client for the [Amazon DynamoDB](https://aws.amazon.com/dynamodb/) NoSQL database service. It targets a subset of the service API. Use `DynamoDB.makeRequest` to add more.
 
+AWS Documentation: https://docs.aws.amazon.com/dynamodb
+
+AWS Console: https://console.aws.amazon.com/dynamodbv2
+
 # Example
 
 The [`example`](https://github.com/billstclair/elm-dynamodb/tree/master/example) directory has some sample code, with a simple user interface.
