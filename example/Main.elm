@@ -267,7 +267,10 @@ receiveScan : Result Error ( Metadata, Maybe ScanValue ) -> Model -> ( Model, Cm
 receiveScan result model =
     case result of
         Err err ->
-            ( { model | display = Debug.toString err }
+            ( { model
+                | display = Debug.toString err
+                , metadata = Nothing
+              }
             , Cmd.none
             )
 
@@ -275,6 +278,7 @@ receiveScan result model =
             ( { model
                 | display = "Scan successful."
                 , scanValue = scanValue
+                , metadata = Just metadata
               }
             , Cmd.none
             )
@@ -368,9 +372,6 @@ update msg model =
 
         ClickScanItem item ->
             let
-                i =
-                    Debug.log "ClickScanItem" item
-
                 keyName =
                     case model.key of
                         SimpleKey ( name, _ ) ->
@@ -386,12 +387,21 @@ update msg model =
                     }
             in
             if keyName == "" then
-                ( mdl, Cmd.none )
+                ( { mdl | display = "\"Key name\" is blank." }
+                , Cmd.none
+                )
 
             else
                 case Dict.get keyName item of
                     Nothing ->
-                        ( mdl, Cmd.none )
+                        ( { mdl
+                            | display =
+                                "Clicked item has no attribute named \""
+                                    ++ keyName
+                                    ++ "\"."
+                          }
+                        , Cmd.none
+                        )
 
                     Just value ->
                         case value of
@@ -406,12 +416,20 @@ update msg model =
                                     , text =
                                         DynamoDB.removeKeyFields key item
                                             |> itemToText
+                                    , display = "Row ready for editing."
                                   }
                                 , Cmd.none
                                 )
 
                             _ ->
-                                ( mdl, Cmd.none )
+                                ( { mdl
+                                    | display =
+                                        "Non-string value for attribute named \""
+                                            ++ keyName
+                                            ++ "\"."
+                                  }
+                                , Cmd.none
+                                )
 
         GetItem ->
             getItem model
@@ -592,9 +610,19 @@ view model =
                 , onInput SetText
                 ]
                 []
+            , br
+            , button [ onClick PutItem ]
+                [ text "PutItem" ]
             ]
-        , button [ onClick PutItem ]
-            [ text "PutItem" ]
+        , case model.item of
+            Nothing ->
+                text ""
+
+            Just item ->
+                p []
+                    [ text "Item: "
+                    , text <| Debug.toString (Dict.toList item)
+                    ]
         , p []
             [ text "Limit: "
             , input
@@ -608,15 +636,6 @@ view model =
             , button [ onClick Scan ]
                 [ text "Scan" ]
             ]
-        , case model.item of
-            Nothing ->
-                text ""
-
-            Just item ->
-                p []
-                    [ text "Item: "
-                    , text <| Debug.toString (Dict.toList item)
-                    ]
         , case model.scanValue of
             Nothing ->
                 text ""
@@ -637,6 +656,8 @@ view model =
                             , button [ onClick ClearLastEvaluatedKey ]
                                 [ text "Clear" ]
                             ]
+                    , br
+                    , text "Click a row below to select it for editing."
                     , renderItemTable ClickScanItem
                         (DynamoDB.keyNames model.key)
                         scanValue.items

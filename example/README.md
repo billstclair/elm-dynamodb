@@ -34,3 +34,7 @@ For example:
     ]
 
 Don't store the `accounts.json` file online anywhere, or you're likely to give away your secret key. Usually, your application will ask the user to enter access and secret keys, and you'll store them in `LocalStorage`, making them private to the user's browser.
+
+# Test Table Restrictions
+
+The AmazonDB table that you choose from `accounts.json` must have a simple primary key attribute with string values, or nothing but "Scan" will work. The "Key Name" defaults to "key", but you can type something different.

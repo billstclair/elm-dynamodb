@@ -96,6 +96,7 @@ import DynamoDB.Types as Types
 import Http exposing (Metadata)
 import Json.Decode as JD exposing (Decoder)
 import Json.Encode as JE exposing (Value)
+import List.Extra as LE
 import Task exposing (Task)
 
 
@@ -523,6 +524,94 @@ addKeyFields key item =
         CompositeKey ( name1, value1 ) ( name2, value2 ) ->
             Dict.insert name1 value1 item
                 |> Dict.insert name2 value2
+
+
+{-| Specify one item for `transactGetItem`.
+
+The `key` attributes are always returned; `returnedAttributeNames`
+needn't include them.
+
+-}
+type alias TransactGetItem =
+    { tableName : TableName
+    , key : Key
+    , returnedAttributeNames : Maybe (List String)
+    }
+
+
+encodeProjectionExpression : List String -> ( List ( String, Value ), String )
+encodeProjectionExpression names =
+    let
+        folder : String -> ( Int, List ( String, Value ), List String ) -> ( Int, List ( String, Value ), List String )
+        folder name ( idx, map, mappedNames ) =
+            let
+                mappedName =
+                    "#" ++ String.fromInt idx
+            in
+            ( idx + 1
+            , ( mappedName, JE.string name ) :: map
+            , mappedName :: mappedNames
+            )
+
+        ( _, expressionAttributeNames, projectionExpressionNames ) =
+            List.foldr folder ( 1, [], [] ) names
+    in
+    ( List.reverse expressionAttributeNames
+    , String.join "," <| List.reverse projectionExpressionNames
+    )
+
+
+projectionExpressionMap : Maybe Key -> Maybe (List String) -> List ( String, Value )
+projectionExpressionMap maybeKey maybeNames =
+    case maybeNames of
+        Nothing ->
+            []
+
+        Just names ->
+            let
+                namesWithKey =
+                    case maybeKey of
+                        Nothing ->
+                            LE.unique names
+
+                        Just key ->
+                            LE.unique <| keyNames key ++ names
+
+                ( expressionAttributeNames, projectionExpression ) =
+                    encodeProjectionExpression namesWithKey
+            in
+            [ ( "ExpressionAttributeNames"
+              , JE.object expressionAttributeNames
+              )
+            , ( "ProjectionExpression"
+              , JE.string projectionExpression
+              )
+            ]
+
+
+transactGetItemInternal : (Metadata -> Decoder a) -> List TransactGetItem -> Request a
+transactGetItemInternal decoder getItems =
+    let
+        encodeGet { key, tableName, returnedAttributeNames } =
+            [ ( "Get"
+              , JE.object <|
+                    List.concat
+                        [ [ ( "Key", ED.encodeKey key )
+                          , ( "TableName", JE.string tableName )
+                          ]
+                        , projectionExpressionMap (Just key) returnedAttributeNames
+                        ]
+              )
+            ]
+
+        payload =
+            JE.object
+                [ ( "TransactItems"
+                  , JE.list JE.object <| List.map encodeGet getItems
+                  )
+                ]
+    in
+    makeFullRequest "TransactGetItems" payload decoder
 
 
 {-| Return the value of an item's string attribute.
