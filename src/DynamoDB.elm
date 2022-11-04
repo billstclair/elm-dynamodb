@@ -15,7 +15,8 @@ module DynamoDB exposing
     , getItem, getItemWithMetadata
     , putItem, putItemWithMetadata
     , deleteItem, deleteItemWithMetadata
-    , scan, scanWithMetadata, ScanValue
+    , ScanValue, scan, scanWithMetadata
+    , TransactGetItem, TransactGetItemValue, transactGetItem, transactGetItemWithMetadata
     , send
     , itemStringValue, itemFloatValue, itemIntValue
     , removeKeyFields, keyNames
@@ -36,7 +37,8 @@ module DynamoDB exposing
 @docs getItem, getItemWithMetadata
 @docs putItem, putItemWithMetadata
 @docs deleteItem, deleteItemWithMetadata
-@docs scan, scanWithMetadata, ScanValue
+@docs ScanValue, scan, scanWithMetadata
+@docs TransactGetItem, TransactGetItemValue, transactGetItem, transactGetItemWithMetadata
 
 
 # Turning a Request into a Task
@@ -533,14 +535,22 @@ addKeyFields key item =
 
 {-| Specify one item for `transactGetItem`.
 
-The `key` attributes are always returned; `returnedAttributeNames`
-needn't include them.
+All attributes are returned if `returnedAttributeNames` is `Nothing`.
 
 -}
 type alias TransactGetItem =
     { tableName : TableName
     , key : Key
     , returnedAttributeNames : Maybe (List String)
+    }
+
+
+{-| One of the return values from `transactGetItem`.
+-}
+type alias TransactGetItemValue =
+    { tableName : TableName
+    , key : Key
+    , item : Maybe Item
     }
 
 
@@ -566,24 +576,16 @@ encodeProjectionExpression names =
     )
 
 
-projectionExpressionMap : Maybe Key -> Maybe (List String) -> List ( String, Value )
-projectionExpressionMap maybeKey maybeNames =
+projectionExpressionMap : Maybe (List String) -> List ( String, Value )
+projectionExpressionMap maybeNames =
     case maybeNames of
         Nothing ->
             []
 
         Just names ->
             let
-                namesWithKey =
-                    case maybeKey of
-                        Nothing ->
-                            LE.unique names
-
-                        Just key ->
-                            LE.unique <| keyNames key ++ names
-
                 ( expressionAttributeNames, projectionExpression ) =
-                    encodeProjectionExpression namesWithKey
+                    encodeProjectionExpression names
             in
             [ ( "ExpressionAttributeNames"
               , JE.object expressionAttributeNames
@@ -594,26 +596,36 @@ projectionExpressionMap maybeKey maybeNames =
             ]
 
 
-
--- Need to return the tableName with each item.
--- Items can be missing. Handle and distinguish (List (Maybe Item)).
--- DynamoDB can also return an empty object if none of the requested
--- attributes are there, but we always ask for the key attributes;
--- maybe we should remember them here, instead of making them go
--- over the wire again.
-
-
-transactGetItemWithMetadataDecoder : a -> Decoder ( a, List Item )
-transactGetItemWithMetadataDecoder metadata =
+transactGetItemWithMetadataDecoder : List TransactGetItem -> a -> Decoder ( a, List TransactGetItemValue )
+transactGetItemWithMetadataDecoder queries metadata =
     JD.field "Responses"
-        (JD.list (JD.field "Item" ED.itemDecoder)
-            |> JD.andThen (\items -> JD.succeed ( metadata, items ))
+        (JD.list
+            (JD.field "Item" <|
+                JD.oneOf
+                    [ JD.null Nothing
+                    , ED.itemDecoder
+                        |> JD.andThen (JD.succeed << Just)
+                    ]
+            )
+            |> JD.andThen
+                (\items ->
+                    let
+                        values =
+                            List.map2
+                                (\{ tableName, key } item ->
+                                    TransactGetItemValue tableName key item
+                                )
+                                queries
+                                items
+                    in
+                    JD.succeed ( metadata, values )
+                )
         )
 
 
-transactGetItemDecoder : a -> Decoder (List Item)
-transactGetItemDecoder metadata =
-    tossMetadataDecoder metadata transactGetItemWithMetadataDecoder
+transactGetItemDecoder : List TransactGetItem -> a -> Decoder (List TransactGetItemValue)
+transactGetItemDecoder queries metadata =
+    tossMetadataDecoder metadata (transactGetItemWithMetadataDecoder queries)
 
 
 {-| Do a bunch of GetItem requests inside a transaction.
@@ -621,7 +633,7 @@ transactGetItemDecoder metadata =
 Will error if the list has more than ten elements.
 
 -}
-transactGetItem : List TransactGetItem -> Request (List Item)
+transactGetItem : List TransactGetItem -> Request (List TransactGetItemValue)
 transactGetItem =
     transactGetItemInternal transactGetItemDecoder
 
@@ -631,22 +643,22 @@ transactGetItem =
 Will error if the list has more than ten elements.
 
 -}
-transactGetItemWithMetadata : List TransactGetItem -> Request ( Metadata, List Item )
+transactGetItemWithMetadata : List TransactGetItem -> Request ( Metadata, List TransactGetItemValue )
 transactGetItemWithMetadata =
     transactGetItemInternal transactGetItemWithMetadataDecoder
 
 
-transactGetItemInternal : (Metadata -> Decoder a) -> List TransactGetItem -> Request a
+transactGetItemInternal : (List TransactGetItem -> Metadata -> Decoder a) -> List TransactGetItem -> Request a
 transactGetItemInternal decoder getItems =
     let
-        encodeGet { key, tableName, returnedAttributeNames } =
+        encodeGet { tableName, key, returnedAttributeNames } =
             [ ( "Get"
               , JE.object <|
                     List.concat
                         [ [ ( "Key", ED.encodeKey key )
                           , ( "TableName", JE.string tableName )
                           ]
-                        , projectionExpressionMap (Just key) returnedAttributeNames
+                        , projectionExpressionMap returnedAttributeNames
                         ]
               )
             ]
@@ -658,7 +670,7 @@ transactGetItemInternal decoder getItems =
                   )
                 ]
     in
-    makeFullRequest "TransactGetItems" payload decoder
+    makeFullRequest "TransactGetItems" payload (decoder getItems)
 
 
 {-| Return the value of an item's string attribute.
