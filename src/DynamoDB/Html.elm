@@ -103,7 +103,7 @@ itemsColumnNames keyNames items =
 The list of strings is the key names which should appear first in the
 displayed table.
 
-The wrapper (`(Item -> msg)`) is called when the user clicks on a row.
+The wrapper, `(Item -> msg)`, is called when the user clicks on a row.
 
 -}
 renderItemTable : (Item -> msg) -> List String -> List Item -> Html msg

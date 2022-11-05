@@ -784,7 +784,11 @@ view model =
                         scanValue.items
                     ]
         , p []
-            [ text "Transaction keys: "
+            [ text "The following two fields are comma-separated-lists."
+            , br
+            , text "Leave \"Tranaction attributes\" blank to get all attributes."
+            , br
+            , text "Transaction keys: "
             , input
                 [ type_ "text"
                 , size 40

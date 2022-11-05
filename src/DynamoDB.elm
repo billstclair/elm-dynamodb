@@ -17,9 +17,10 @@ module DynamoDB exposing
     , deleteItem, deleteItemWithMetadata
     , ScanValue, scan, scanWithMetadata
     , TransactGetItem, TransactGetItemValue, transactGetItems, transactGetItemsWithMetadata
+    , TransactWrite, transactWriteItems, transactWriteItemsWithMetadata
     , send
     , itemStringValue, itemFloatValue, itemIntValue
-    , removeKeyFields, keyNames
+    , removeKeyFields, addKeyFields, keyNames
     , readAccounts, decodeAccounts, accountDecoder, encodeAccount
     , makeRequest, makeFullRequest
     )
@@ -39,6 +40,7 @@ module DynamoDB exposing
 @docs deleteItem, deleteItemWithMetadata
 @docs ScanValue, scan, scanWithMetadata
 @docs TransactGetItem, TransactGetItemValue, transactGetItems, transactGetItemsWithMetadata
+@docs TransactWrite, transactWriteItems, transactWriteItemsWithMetadata
 
 
 # Turning a Request into a Task
@@ -53,7 +55,7 @@ module DynamoDB exposing
 
 # Utility functions
 
-@docs removeKeyFields, keyNames
+@docs removeKeyFields, addKeyFields, keyNames
 
 
 # Reading accounts into Elm
@@ -334,6 +336,9 @@ getItemDecoder metadata =
 
 
 {-| Get an item from a table.
+
+See <https://docs.aws.amazon.com/amazondynamodb/latest/APIReference/API_GetItem.html>
+
 -}
 getItem : TableName -> Key -> Request (Maybe Item)
 getItem =
@@ -634,9 +639,11 @@ transactGetItemsDecoder queries metadata =
     tossMetadataDecoder metadata (transactGetItemsWithMetadataDecoder queries)
 
 
-{-| Do a bunch of GetItem requests inside a transaction.
+{-| Do a bunch of `TransactGetItem` requests inside a transaction.
 
-Will error if the list has more than ten elements.
+Will error if the list has more than 100 elements.
+
+See <https://docs.aws.amazon.com/amazondynamodb/latest/APIReference/API_TransactGetItems.html>
 
 -}
 transactGetItems : List TransactGetItem -> Request (List TransactGetItemValue)
@@ -644,9 +651,9 @@ transactGetItems =
     transactGetItemsInternal transactGetItemsDecoder
 
 
-{-| Do a bunch of GetItem requests inside a transaction, returning the Http request `Metadata`.
+{-| Do a bunch of `TransactGetItem` requests inside a transaction, returning the Http request `Metadata`.
 
-Will error if the list has more than ten elements.
+Will error if the list has more than 100 elements.
 
 -}
 transactGetItemsWithMetadata : List TransactGetItem -> Request ( Metadata, List TransactGetItemValue )
@@ -677,6 +684,90 @@ transactGetItemsInternal decoder getItems =
                 ]
     in
     makeFullRequest "TransactGetItems" payload (decoder getItems)
+
+
+{-| One action for the list passed to `transactWriteItems`.
+
+`TransactWriteDelete` deletes the attribute with the given `key`.
+
+`TransactWritePut` writes (or overwrites) the given `item`, merging
+the `key` name/value pairs into `item`, if `key` is not Nothing.
+
+-}
+type TransactWrite
+    = TransactWriteDelete
+        { tableName : TableName
+        , key : Key
+        }
+    | TransactWritePut
+        { tableName : TableName
+        , key : Maybe Key
+        , item : Item
+        }
+
+
+{-| Do a bunch of `TransactWrite` requests inside a transaction. There is no return value.
+
+Will error if the list has more than 100 elements.
+
+See <https://docs.aws.amazon.com/amazondynamodb/latest/APIReference/API_TransactWriteItems.html>
+
+-}
+transactWriteItems : List TransactWrite -> Request ()
+transactWriteItems =
+    transactWriteItemsInternal voidDecoder
+
+
+{-| Do a bunch of `TransactWrite` requests inside a transaction, returning the Http request `Metdata`.
+
+Will error if the list has more than 100 elements.
+
+-}
+transactWriteItemsWithMetadata : List TransactWrite -> Request Metadata
+transactWriteItemsWithMetadata =
+    transactWriteItemsInternal voidWithMetadataDecoder
+
+
+transactWriteItemsInternal : (Metadata -> Decoder a) -> List TransactWrite -> Request a
+transactWriteItemsInternal decoder writeItems =
+    let
+        encodeWrite write =
+            case write of
+                TransactWriteDelete { tableName, key } ->
+                    JE.object
+                        [ ( "Delete"
+                          , JE.object
+                                [ ( "TableName", JE.string tableName )
+                                , ( "Key", ED.encodeKey key )
+                                ]
+                          )
+                        ]
+
+                TransactWritePut { tableName, key, item } ->
+                    let
+                        fullItem =
+                            case key of
+                                Nothing ->
+                                    item
+
+                                Just k ->
+                                    addKeyFields k item
+                    in
+                    JE.object
+                        [ ( "Put"
+                          , JE.object
+                                [ ( "Item", ED.encodeItem fullItem ) ]
+                          )
+                        ]
+
+        payload =
+            JE.object
+                [ ( "TransactItems"
+                  , JE.list identity <| List.map encodeWrite writeItems
+                  )
+                ]
+    in
+    makeFullRequest "TransactWriteItems" payload decoder
 
 
 {-| Return the value of an item's string attribute.
