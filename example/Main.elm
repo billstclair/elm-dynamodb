@@ -14,7 +14,7 @@ module Main exposing (..)
 
 import Browser
 import Dict exposing (Dict)
-import DynamoDB exposing (ScanValue)
+import DynamoDB exposing (ScanValue, TransactGetItem, TransactGetItemValue)
 import DynamoDB.EncodeDecode as ED
 import DynamoDB.Html exposing (renderItemTable)
 import DynamoDB.Types
@@ -88,6 +88,8 @@ type alias Model =
     , text : String
     , limit : String
     , scanValue : Maybe ScanValue
+    , transactKeys : String
+    , transactAttributeNames : String
     , metadata : Maybe Metadata
     }
 
@@ -98,16 +100,20 @@ type Msg
     | SetKeyValue String
     | SetText String
     | SetLimit String
+    | SetTransactKeys String
+    | SetTransactAttributeNames String
     | ClearLastEvaluatedKey
     | ClickScanItem Item
     | GetItem
     | PutItem
     | DeleteItem
     | Scan
+    | TransactGetItems
     | ReceiveGetItem Key (Result Error ( Metadata, Maybe Item ))
     | ReceivePutItem Key (Result Error Metadata)
     | ReceiveDeleteItem Key (Result Error Metadata)
     | ReceiveScan (Result Error ( Metadata, Maybe ScanValue ))
+    | ReceiveTransactGetItems (Result Error ( Metadata, List TransactGetItemValue ))
     | ReceiveAccounts (Result Error (List Account))
 
 
@@ -121,6 +127,8 @@ init _ =
       , text = ""
       , limit = ""
       , scanValue = Nothing
+      , transactKeys = ""
+      , transactAttributeNames = ""
       , metadata = Nothing
       }
     , Task.attempt ReceiveAccounts (DynamoDB.readAccounts Nothing)
@@ -284,6 +292,103 @@ receiveScan result model =
             )
 
 
+trimSplit : String -> List String
+trimSplit string =
+    String.split "," string
+        |> List.map String.trim
+        |> (\l ->
+                if l == [ "" ] then
+                    []
+
+                else
+                    l
+           )
+
+
+transactGetItems : Model -> ( Model, Cmd Msg )
+transactGetItems model =
+    let
+        keys =
+            trimSplit model.transactKeys
+
+        attributes : Maybe (List String)
+        attributes =
+            trimSplit model.transactAttributeNames
+                |> (\l ->
+                        if l == [] then
+                            Nothing
+
+                        else
+                            Just l
+                   )
+
+        items : List TransactGetItem
+        items =
+            List.map
+                (\keyName ->
+                    { tableName = model.account.tableName
+                    , key =
+                        case model.key of
+                            SimpleKey ( name, _ ) ->
+                                SimpleKey ( name, StringValue keyName )
+
+                            CompositeKey ( name, _ ) pair ->
+                                CompositeKey ( name, StringValue keyName ) pair
+                    , returnedAttributeNames = attributes
+                    }
+                )
+                keys
+    in
+    ( { model
+        | display = "TransactGetItems..."
+        , scanValue = Nothing
+      }
+    , DynamoDB.transactGetItemsWithMetadata items
+        |> DynamoDB.send model.account
+        |> Task.attempt ReceiveTransactGetItems
+    )
+
+
+receiveTransactGetItems : Result Error ( Metadata, List TransactGetItemValue ) -> Model -> ( Model, Cmd Msg )
+receiveTransactGetItems result model =
+    case result of
+        Err err ->
+            ( { model
+                | display = Debug.toString err
+                , metadata = Nothing
+              }
+            , Cmd.none
+            )
+
+        Ok ( metadata, getItemsValue ) ->
+            let
+                transactGetItemToItem : TransactGetItemValue -> Item
+                transactGetItemToItem value =
+                    case value.item of
+                        Nothing ->
+                            Dict.fromList
+                                [ ( "<missing key>"
+                                  , StringValue <| primaryKeyValue value.key
+                                  )
+                                ]
+
+                        Just item ->
+                            item
+            in
+            ( { model
+                | display = "TransactGetItems successful."
+                , scanValue =
+                    Just
+                        { count = List.length getItemsValue
+                        , items =
+                            List.map transactGetItemToItem getItemsValue
+                        , lastEvaluatedKey = Nothing
+                        }
+              }
+            , Cmd.none
+            )
+
+
 defaultAccount : Account
 defaultAccount =
     { name = "No account"
@@ -354,6 +459,16 @@ update msg model =
 
         SetLimit text ->
             ( { model | limit = text }
+            , Cmd.none
+            )
+
+        SetTransactKeys text ->
+            ( { model | transactKeys = text }
+            , Cmd.none
+            )
+
+        SetTransactAttributeNames text ->
+            ( { model | transactAttributeNames = text }
             , Cmd.none
             )
 
@@ -443,6 +558,9 @@ update msg model =
         Scan ->
             scan model
 
+        TransactGetItems ->
+            transactGetItems model
+
         ReceiveGetItem key result ->
             receiveGetItem key result model
 
@@ -454,6 +572,9 @@ update msg model =
 
         ReceiveScan result ->
             receiveScan result model
+
+        ReceiveTransactGetItems result ->
+            receiveTransactGetItems result model
 
         ReceiveAccounts result ->
             case result of
@@ -662,6 +783,28 @@ view model =
                         (DynamoDB.keyNames model.key)
                         scanValue.items
                     ]
+        , p []
+            [ text "Transaction keys: "
+            , input
+                [ type_ "text"
+                , size 40
+                , value model.transactKeys
+                , onInput SetTransactKeys
+                ]
+                []
+            , br
+            , text "Transaction attributes: "
+            , input
+                [ type_ "text"
+                , size 40
+                , value model.transactAttributeNames
+                , onInput SetTransactAttributeNames
+                ]
+                []
+            , br
+            , button [ onClick TransactGetItems ]
+                [ text "TransactGetItems" ]
+            ]
         , case model.metadata of
             Nothing ->
                 text ""

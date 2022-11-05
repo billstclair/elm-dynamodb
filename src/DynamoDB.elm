@@ -16,7 +16,7 @@ module DynamoDB exposing
     , putItem, putItemWithMetadata
     , deleteItem, deleteItemWithMetadata
     , ScanValue, scan, scanWithMetadata
-    , TransactGetItem, TransactGetItemValue, transactGetItem, transactGetItemWithMetadata
+    , TransactGetItem, TransactGetItemValue, transactGetItems, transactGetItemsWithMetadata
     , send
     , itemStringValue, itemFloatValue, itemIntValue
     , removeKeyFields, keyNames
@@ -38,7 +38,7 @@ module DynamoDB exposing
 @docs putItem, putItemWithMetadata
 @docs deleteItem, deleteItemWithMetadata
 @docs ScanValue, scan, scanWithMetadata
-@docs TransactGetItem, TransactGetItemValue, transactGetItem, transactGetItemWithMetadata
+@docs TransactGetItem, TransactGetItemValue, transactGetItems, transactGetItemsWithMetadata
 
 
 # Turning a Request into a Task
@@ -533,7 +533,7 @@ addKeyFields key item =
                 |> Dict.insert name2 value2
 
 
-{-| Specify one item for `transactGetItem`.
+{-| Specify one item for `transactGetItems`.
 
 All attributes are returned if `returnedAttributeNames` is `Nothing`.
 
@@ -545,7 +545,7 @@ type alias TransactGetItem =
     }
 
 
-{-| One of the return values from `transactGetItem`.
+{-| One of the return values from `transactGetItems`.
 -}
 type alias TransactGetItemValue =
     { tableName : TableName
@@ -596,16 +596,22 @@ projectionExpressionMap maybeNames =
             ]
 
 
-transactGetItemWithMetadataDecoder : List TransactGetItem -> a -> Decoder ( a, List TransactGetItemValue )
-transactGetItemWithMetadataDecoder queries metadata =
+transactGetItemsWithMetadataDecoder : List TransactGetItem -> a -> Decoder ( a, List TransactGetItemValue )
+transactGetItemsWithMetadataDecoder queries metadata =
     JD.field "Responses"
         (JD.list
-            (JD.field "Item" <|
-                JD.oneOf
-                    [ JD.null Nothing
-                    , ED.itemDecoder
-                        |> JD.andThen (JD.succeed << Just)
-                    ]
+            (JD.value
+                |> JD.andThen
+                    (\v ->
+                        case JD.decodeValue (JD.field "Item" JD.value) v of
+                            Err _ ->
+                                -- Missing key
+                                JD.succeed Nothing
+
+                            Ok _ ->
+                                JD.field "Item" ED.itemDecoder
+                                    |> JD.map Just
+                    )
             )
             |> JD.andThen
                 (\items ->
@@ -623,9 +629,9 @@ transactGetItemWithMetadataDecoder queries metadata =
         )
 
 
-transactGetItemDecoder : List TransactGetItem -> a -> Decoder (List TransactGetItemValue)
-transactGetItemDecoder queries metadata =
-    tossMetadataDecoder metadata (transactGetItemWithMetadataDecoder queries)
+transactGetItemsDecoder : List TransactGetItem -> a -> Decoder (List TransactGetItemValue)
+transactGetItemsDecoder queries metadata =
+    tossMetadataDecoder metadata (transactGetItemsWithMetadataDecoder queries)
 
 
 {-| Do a bunch of GetItem requests inside a transaction.
@@ -633,9 +639,9 @@ transactGetItemDecoder queries metadata =
 Will error if the list has more than ten elements.
 
 -}
-transactGetItem : List TransactGetItem -> Request (List TransactGetItemValue)
-transactGetItem =
-    transactGetItemInternal transactGetItemDecoder
+transactGetItems : List TransactGetItem -> Request (List TransactGetItemValue)
+transactGetItems =
+    transactGetItemsInternal transactGetItemsDecoder
 
 
 {-| Do a bunch of GetItem requests inside a transaction, returning the Http request `Metadata`.
@@ -643,13 +649,13 @@ transactGetItem =
 Will error if the list has more than ten elements.
 
 -}
-transactGetItemWithMetadata : List TransactGetItem -> Request ( Metadata, List TransactGetItemValue )
-transactGetItemWithMetadata =
-    transactGetItemInternal transactGetItemWithMetadataDecoder
+transactGetItemsWithMetadata : List TransactGetItem -> Request ( Metadata, List TransactGetItemValue )
+transactGetItemsWithMetadata =
+    transactGetItemsInternal transactGetItemsWithMetadataDecoder
 
 
-transactGetItemInternal : (List TransactGetItem -> Metadata -> Decoder a) -> List TransactGetItem -> Request a
-transactGetItemInternal decoder getItems =
+transactGetItemsInternal : (List TransactGetItem -> Metadata -> Decoder a) -> List TransactGetItem -> Request a
+transactGetItemsInternal decoder getItems =
     let
         encodeGet { tableName, key, returnedAttributeNames } =
             [ ( "Get"
