@@ -12,9 +12,8 @@
 
 module DynamoDB.Types exposing
     ( TableName
-    , Error(..), Account
     , Key(..), Item, AttributeValue(..)
-    , Query, QueryElement(..)
+    , Error(..), Account
     )
 
 {-| Types for DynamoDB module
@@ -23,9 +22,8 @@ module DynamoDB.Types exposing
 # Types
 
 @docs TableName
-@docs Error, Account
 @docs Key, Item, AttributeValue
-@docs Query, QueryElement
+@docs Error, Account
 
 -}
 
@@ -102,24 +100,3 @@ type Key
 -}
 type alias Item =
     Dict String AttributeValue
-
-
-{-| An element of a `Query`, used for HTTP headers and query parameters.
-
-`AnyQuery` allows you to encode any key/value pair.
-
-The others are used as query parameters with `S3.listKeys`.
-
--}
-type QueryElement
-    = AnyQuery String String
-    | Delimiter String
-    | Marker String
-    | MaxKeys Int
-    | Prefix String
-
-
-{-| A list of `QueryElement`s.
--}
-type alias Query =
-    List QueryElement

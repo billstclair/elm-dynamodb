@@ -30,7 +30,6 @@ import DynamoDB.Types
         , Error(..)
         , Item
         , Key(..)
-        , QueryElement(..)
         )
 import Html
     exposing

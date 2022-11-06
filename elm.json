@@ -3,7 +3,7 @@
     "name": "billstclair/elm-dynamodb",
     "summary": "elm-dynamodb is a pure Elm client module for Amazon's DynamoDB service.",
     "license": "MIT",
-    "version": "1.0.0",
+    "version": "1.0.2",
     "exposed-modules": [
         "DynamoDB",
         "DynamoDB.Types",

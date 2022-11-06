@@ -12,13 +12,13 @@
 
 module DynamoDB exposing
     ( Request
+    , send
     , getItem, getItemWithMetadata
     , putItem, putItemWithMetadata
     , deleteItem, deleteItemWithMetadata
     , ScanValue, scan, scanWithMetadata
     , TransactGetItem, TransactGetItemValue, transactGetItems, transactGetItemsWithMetadata
     , TransactWrite(..), transactWriteItems, transactWriteItemsWithMetadata
-    , send
     , itemStringValue, itemFloatValue, itemIntValue
     , removeKeyFields, addKeyFields, keyNames
     , readAccounts, decodeAccounts, accountDecoder, encodeAccount
@@ -33,6 +33,11 @@ module DynamoDB exposing
 @docs Request
 
 
+# Turning a Request into a Task
+
+@docs send
+
+
 # Creating requests
 
 @docs getItem, getItemWithMetadata
@@ -41,11 +46,6 @@ module DynamoDB exposing
 @docs ScanValue, scan, scanWithMetadata
 @docs TransactGetItem, TransactGetItemValue, transactGetItems, transactGetItemsWithMetadata
 @docs TransactWrite, transactWriteItems, transactWriteItemsWithMetadata
-
-
-# Turning a Request into a Task
-
-@docs send
 
 
 # Accessing values in items
@@ -93,8 +93,6 @@ import DynamoDB.Types as Types
         , Error(..)
         , Item
         , Key(..)
-        , Query
-        , QueryElement(..)
         , TableName
         )
 import Http exposing (Metadata)
@@ -863,7 +861,7 @@ send account request =
             makeCredentials account
 
         req2 =
-            addHeaders [ AnyQuery "Accept" "*/*" ] request
+            addHeaders [ ( "Accept", "*/*" ) ] request
     in
     AWS.Http.send service credentials req2
         |> Task.onError
@@ -879,42 +877,11 @@ send account request =
             )
 
 
-formatQuery : Query -> List ( String, String )
-formatQuery query =
-    let
-        formatElement =
-            \element ->
-                case element of
-                    AnyQuery k v ->
-                        ( k, v )
-
-                    Delimiter s ->
-                        ( "delimiter", s )
-
-                    Marker s ->
-                        ( "marker", s )
-
-                    MaxKeys cnt ->
-                        ( "max-keys", String.fromInt cnt )
-
-                    Prefix s ->
-                        ( "prefix", s )
-    in
-    List.map formatElement query
-
-
 {-| Add headers to a `Request`.
 -}
-addHeaders : Query -> Request a -> Request a
+addHeaders : List ( String, String ) -> Request a -> Request a
 addHeaders headers req =
-    AWS.Http.addHeaders (formatQuery headers) req
-
-
-{-| Add query parameters to a `Request`.
--}
-addQuery : Query -> Request a -> Request a
-addQuery query req =
-    AWS.Http.addQuery (formatQuery query) req
+    AWS.Http.addHeaders headers req
 
 
 {-| Low-level request creator.

@@ -12,14 +12,14 @@
 
 module DynamoDB.Html exposing (renderItemTable)
 
-{-| A few HTML widgets to ease in displaying DynamoDB data.
+{-| Simple rendering for a list of `DynamoDB.Types.Item`.
 
 @docs renderItemTable
 
 -}
 
 import Dict exposing (Dict)
-import DynamoDB.Types exposing (AttributeValue(..), Item, Key(..), TableName)
+import DynamoDB.Types exposing (AttributeValue(..), Item, TableName)
 import Html
     exposing
         ( Attribute
