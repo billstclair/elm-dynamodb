@@ -14,7 +14,13 @@ module Main exposing (..)
 
 import Browser
 import Dict exposing (Dict)
-import DynamoDB exposing (ScanValue, TransactGetItem, TransactGetItemValue)
+import DynamoDB
+    exposing
+        ( ScanValue
+        , TransactGetItem
+        , TransactGetItemValue
+        , TransactWrite(..)
+        )
 import DynamoDB.EncodeDecode as ED
 import DynamoDB.Html exposing (renderItemTable)
 import DynamoDB.Types
@@ -90,6 +96,8 @@ type alias Model =
     , scanValue : Maybe ScanValue
     , transactKeys : String
     , transactAttributeNames : String
+    , transactDeletedKeys : String
+    , transactIncrement : String
     , metadata : Maybe Metadata
     }
 
@@ -102,6 +110,8 @@ type Msg
     | SetLimit String
     | SetTransactKeys String
     | SetTransactAttributeNames String
+    | SetTransactDeletedKeys String
+    | SetTransactIncrement String
     | ClearLastEvaluatedKey
     | ClickScanItem Item
     | GetItem
@@ -109,11 +119,13 @@ type Msg
     | DeleteItem
     | Scan
     | TransactGetItems
+    | TransactWriteItems
     | ReceiveGetItem Key (Result Error ( Metadata, Maybe Item ))
     | ReceivePutItem Key (Result Error Metadata)
     | ReceiveDeleteItem Key (Result Error Metadata)
     | ReceiveScan (Result Error ( Metadata, Maybe ScanValue ))
     | ReceiveTransactGetItems (Result Error ( Metadata, List TransactGetItemValue ))
+    | ReceiveTransactWriteItems (Result Error Metadata)
     | ReceiveAccounts (Result Error (List Account))
 
 
@@ -129,6 +141,8 @@ init _ =
       , scanValue = Nothing
       , transactKeys = ""
       , transactAttributeNames = ""
+      , transactDeletedKeys = ""
+      , transactIncrement = "1"
       , metadata = Nothing
       }
     , Task.attempt ReceiveAccounts (DynamoDB.readAccounts Nothing)
@@ -349,6 +363,113 @@ transactGetItems model =
     )
 
 
+transactWriteItems : Model -> ( Model, Cmd Msg )
+transactWriteItems model =
+    let
+        transactKeys =
+            trimSplit model.transactKeys
+
+        attributes =
+            trimSplit model.transactAttributeNames
+
+        deletedKeys =
+            trimSplit model.transactDeletedKeys
+
+        incString =
+            String.trim model.transactIncrement
+
+        incNumber =
+            Maybe.withDefault 0 <| String.toFloat incString
+
+        keyName =
+            primaryKeyName model.key
+
+        kvToKey kv =
+            SimpleKey ( keyName, StringValue kv )
+
+        incAttributes item =
+            Dict.map
+                (\k v ->
+                    if
+                        (incString == "")
+                            || (attributes /= [] && (not <| List.member k attributes))
+                    then
+                        v
+
+                    else
+                        case v of
+                            StringValue s ->
+                                StringValue <| s ++ "." ++ incString
+
+                            NumberValue s ->
+                                NumberValue <| s + incNumber
+
+                            _ ->
+                                v
+                )
+                item
+
+        puts =
+            case model.scanValue of
+                Nothing ->
+                    []
+
+                Just scanValue ->
+                    let
+                        putPairs =
+                            List.filterMap
+                                (\item ->
+                                    case Dict.get keyName item of
+                                        Nothing ->
+                                            Nothing
+
+                                        Just v ->
+                                            case v of
+                                                StringValue s ->
+                                                    if
+                                                        List.member s transactKeys
+                                                            && (not <| List.member s deletedKeys)
+                                                    then
+                                                        Just ( s, item )
+
+                                                    else
+                                                        Nothing
+
+                                                _ ->
+                                                    Nothing
+                                )
+                                scanValue.items
+                    in
+                    List.map
+                        (\( kv, item ) ->
+                            TransactWritePut
+                                { tableName = model.account.tableName
+                                , key = Just <| kvToKey kv
+                                , item = incAttributes item
+                                }
+                        )
+                        putPairs
+
+        deletes =
+            deletedKeys
+                |> List.map
+                    (\kv ->
+                        TransactWriteDelete
+                            { tableName = model.account.tableName
+                            , key = kvToKey kv
+                            }
+                    )
+    in
+    ( { model
+        | display = "TransactWriteItems..."
+        , metadata = Nothing
+      }
+    , DynamoDB.transactWriteItemsWithMetadata (puts ++ deletes)
+        |> DynamoDB.send model.account
+        |> Task.attempt ReceiveTransactWriteItems
+    )
+
+
 receiveTransactGetItems : Result Error ( Metadata, List TransactGetItemValue ) -> Model -> ( Model, Cmd Msg )
 receiveTransactGetItems result model =
     case result of
@@ -472,6 +593,16 @@ update msg model =
             , Cmd.none
             )
 
+        SetTransactDeletedKeys text ->
+            ( { model | transactDeletedKeys = text }
+            , Cmd.none
+            )
+
+        SetTransactIncrement text ->
+            ( { model | transactIncrement = text }
+            , Cmd.none
+            )
+
         ClearLastEvaluatedKey ->
             case model.scanValue of
                 Nothing ->
@@ -561,6 +692,9 @@ update msg model =
         TransactGetItems ->
             transactGetItems model
 
+        TransactWriteItems ->
+            transactWriteItems model
+
         ReceiveGetItem key result ->
             receiveGetItem key result model
 
@@ -575,6 +709,9 @@ update msg model =
 
         ReceiveTransactGetItems result ->
             receiveTransactGetItems result model
+
+        ReceiveTransactWriteItems result ->
+            receiveEmptyResult "TransactWriteItems successful." Nothing result model
 
         ReceiveAccounts result ->
             case result of
@@ -691,14 +828,14 @@ view model =
         [ p [ style "color" "red" ]
             [ text model.display ]
         , p []
-            [ text "Account: "
+            [ b "Account: "
             , accountSelector model
             , br
-            , text "Table Name: "
+            , b "Table Name: "
             , text model.account.tableName
             ]
         , p []
-            [ text "Key name: "
+            [ b "Key name: "
             , input
                 [ type_ "text"
                 , size 40
@@ -707,7 +844,7 @@ view model =
                 ]
                 []
             , br
-            , text "Key value: "
+            , b "Key value: "
             , input
                 [ type_ "text"
                 , size 40
@@ -741,11 +878,11 @@ view model =
 
             Just item ->
                 p []
-                    [ text "Item: "
+                    [ b "Item: "
                     , text <| Debug.toString (Dict.toList item)
                     ]
         , p []
-            [ text "Limit: "
+            [ b "Limit: "
             , input
                 [ type_ "text"
                 , size 5
@@ -763,10 +900,10 @@ view model =
 
             Just scanValue ->
                 p []
-                    [ text "scan count: "
+                    [ b "scan count: "
                     , text <| String.fromInt scanValue.count
                     , br
-                    , text "lastEvaluatedKey: "
+                    , b "lastEvaluatedKey: "
                     , text <| Debug.toString scanValue.lastEvaluatedKey
                     , if scanValue.lastEvaluatedKey == Nothing then
                         text " "
@@ -788,7 +925,7 @@ view model =
             , br
             , text "Leave \"Tranaction attributes\" blank to get all attributes."
             , br
-            , text "Transaction keys: "
+            , b "Transaction keys: "
             , input
                 [ type_ "text"
                 , size 40
@@ -797,7 +934,7 @@ view model =
                 ]
                 []
             , br
-            , text "Transaction attributes: "
+            , b "Transaction attributes: "
             , input
                 [ type_ "text"
                 , size 40
@@ -809,28 +946,64 @@ view model =
             , button [ onClick TransactGetItems ]
                 [ text "TransactGetItems" ]
             ]
+        , p []
+            [ b "Transaction deleted keys: "
+            , input
+                [ type_ "text"
+                , size 40
+                , value model.transactDeletedKeys
+                , onInput SetTransactDeletedKeys
+                ]
+                []
+            , br
+            , b "Transaction increment: "
+            , input
+                [ type_ "text"
+                , size 10
+                , value model.transactIncrement
+                , onInput SetTransactIncrement
+                ]
+                []
+            , br
+            , text <|
+                "The \"TransactWriteItems\" button operates on rows whose key values"
+                    ++ " are listed in \"Transaction keys\" or \"Transaction deleted keys\""
+                    ++ "and on the attributes in \"Transaction attributes\"."
+            , br
+            , text <|
+                "It adds the \"Transaction increment\" to the values displayed in"
+                    ++ " the table populated by the \"Scan\" or \"TransactGetItems\" button."
+            , br
+            , button [ onClick TransactWriteItems ]
+                [ text "TransactWriteItems" ]
+            ]
         , case model.metadata of
             Nothing ->
                 text ""
 
             Just metadata ->
                 p []
-                    [ text "URL: "
+                    [ b "URL: "
                     , text metadata.url
                     , br
-                    , text "statusCode: "
+                    , b "statusCode: "
                     , text <| String.fromInt metadata.statusCode
                     , br
-                    , text "statusText: "
+                    , b "statusText: "
                     , text metadata.statusText
                     , br
-                    , text "Headers: "
+                    , b "Headers: "
                     , text <| Debug.toString (Dict.toList metadata.headers)
                     ]
         ]
 
 
-br : Html Msg
+b : String -> Html msg
+b str =
+    Html.b [] [ text str ]
+
+
+br : Html msg
 br =
     Html.br [] []
 

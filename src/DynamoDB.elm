@@ -17,7 +17,7 @@ module DynamoDB exposing
     , deleteItem, deleteItemWithMetadata
     , ScanValue, scan, scanWithMetadata
     , TransactGetItem, TransactGetItemValue, transactGetItems, transactGetItemsWithMetadata
-    , TransactWrite, transactWriteItems, transactWriteItemsWithMetadata
+    , TransactWrite(..), transactWriteItems, transactWriteItemsWithMetadata
     , send
     , itemStringValue, itemFloatValue, itemIntValue
     , removeKeyFields, addKeyFields, keyNames
@@ -756,7 +756,9 @@ transactWriteItemsInternal decoder writeItems =
                     JE.object
                         [ ( "Put"
                           , JE.object
-                                [ ( "Item", ED.encodeItem fullItem ) ]
+                                [ ( "TableName", JE.string tableName )
+                                , ( "Item", ED.encodeItem fullItem )
+                                ]
                           )
                         ]
 
