@@ -6,6 +6,8 @@ AWS Documentation: https://docs.aws.amazon.com/dynamodb
 
 AWS Console: https://console.aws.amazon.com/dynamodbv2
 
+[dynamodb-setup.md](https://github.com/billstclair/elm-dynamodb/blob/main/dynamodb-setup.md) contains a simple tutorial for creating AWS root and user accounts and your first DynamoDB table.
+
 # Example
 
 The [`example`](https://github.com/billstclair/elm-dynamodb/tree/master/example) directory has some sample code, with a simple user interface.
