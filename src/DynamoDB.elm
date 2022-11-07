@@ -20,7 +20,7 @@ module DynamoDB exposing
     , TransactGetItem, TransactGetItemValue, transactGetItems, transactGetItemsWithMetadata
     , TransactWrite(..), transactWriteItems, transactWriteItemsWithMetadata
     , itemStringValue, itemFloatValue, itemIntValue
-    , removeKeyFields, addKeyFields, keyNames
+    , makeItem, removeKeyFields, addKeyFields, keyNames
     , readAccounts, decodeAccounts, accountDecoder, encodeAccount
     , makeRequest, makeFullRequest
     )
@@ -55,7 +55,7 @@ module DynamoDB exposing
 
 # Utility functions
 
-@docs removeKeyFields, addKeyFields, keyNames
+@docs makeItem, removeKeyFields, addKeyFields, keyNames
 
 
 # Reading accounts into Elm
@@ -819,6 +819,13 @@ If the attribute does not exist or doesn't have a float value, returns
 itemIntValue : String -> Item -> Int
 itemIntValue string item =
     round <| itemFloatValue string item
+
+
+{-| Create an `Item` from a list of (key, value) tuples.
+-}
+makeItem : List ( String, AttributeValue ) -> Item
+makeItem =
+    Dict.fromList
 
 
 {-| Remove the key fields from an `Item`.
