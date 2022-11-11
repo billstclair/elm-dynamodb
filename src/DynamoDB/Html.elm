@@ -113,39 +113,29 @@ The wrapper, `(Item -> msg)`, is called when the user clicks on a row.
 renderItemTable : (Item -> msg) -> List String -> List Item -> Html msg
 renderItemTable wrapper keyNames items =
     let
-        columnNames =
-            itemsColumnNames keyNames items
+        config =
+            { itemTableConfig
+                | columnDescriptors = itemsColumnNames keyNames items
+            }
     in
-    div []
-        [ styleElement []
-            [ text prettytableStyle ]
-        , table
-            [ class "prettytable" ]
-            ([ tr [] <|
-                List.map (\name -> th [] [ text name ]) columnNames
-             ]
-                ++ List.map (itemRow wrapper columnNames) items
-            )
-        ]
+    renderTable wrapper config items
 
 
-itemRow : (Item -> msg) -> List String -> Item -> Html msg
-itemRow wrapper columnNames item =
-    let
-        itemTd columnName =
-            let
-                str =
-                    case Dict.get columnName item of
-                        Nothing ->
-                            ""
+itemTableConfig =
+    { columnDescriptors = []
+    , columnDescriptorToString = identity
+    , elementToString = itemToString
+    }
 
-                        Just value ->
-                            attributeValueToText value
-            in
-            td [] [ text str ]
-    in
-    tr [ onClick <| wrapper item ] <|
-        List.map itemTd columnNames
+
+itemToString : String -> Item -> Maybe String
+itemToString columnName item =
+    case Dict.get columnName item of
+        Nothing ->
+            Nothing
+
+        Just value ->
+            Just <| attributeValueToText value
 
 
 attributeValueToText : AttributeValue -> String
