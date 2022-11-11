@@ -166,7 +166,7 @@ type alias TableConfig element columnDescriptor =
 
 {-| Render a table. `renderItemTable` is implemented with this.
 
-The wrapper, `(item -> msg)`, is called when the user clicks on a row.
+The wrapper, `(element -> msg)`, is called when the user clicks on a row.
 
 -}
 renderTable : (element -> msg) -> TableConfig element columnDescriptor -> List element -> Html msg
