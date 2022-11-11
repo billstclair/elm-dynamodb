@@ -10,11 +10,15 @@
 ----------------------------------------------------------------------
 
 
-module DynamoDB.Html exposing (renderItemTable)
+module DynamoDB.Html exposing
+    ( renderItemTable
+    , TableConfig, renderTable
+    )
 
 {-| Simple rendering for a list of `DynamoDB.Types.Item`.
 
 @docs renderItemTable
+@docs TableConfig, renderTable
 
 -}
 
@@ -159,3 +163,51 @@ attributeValueToText value =
         -- TODO: flesh out more of these
         _ ->
             Debug.toString value
+
+
+{-| Describe a table column for `renderTable`.
+-}
+type alias TableConfig element columnDescriptor =
+    { columnDescriptors : List columnDescriptor
+    , columnDescriptorToString : columnDescriptor -> String
+    , elementToString : columnDescriptor -> element -> Maybe String
+    }
+
+
+{-| Render a table. `renderItemTable` is implemented with this.
+
+The wrapper, `(item -> msg)`, is called when the user clicks on a row.
+
+-}
+renderTable : (element -> msg) -> TableConfig element columnDescriptor -> List element -> Html msg
+renderTable wrapper config elements =
+    let
+        columnNames =
+            List.map config.columnDescriptorToString config.columnDescriptors
+    in
+    div []
+        [ styleElement []
+            [ text prettytableStyle ]
+        , table
+            [ class "prettytable" ]
+            ([ tr [] <|
+                List.map (\name -> th [] [ text name ]) columnNames
+             ]
+                ++ List.map (elementRow wrapper config) elements
+            )
+        ]
+
+
+elementRow : (element -> msg) -> TableConfig element columnDescriptor -> element -> Html msg
+elementRow wrapper config element =
+    let
+        elementTd columnDescriptor =
+            let
+                str =
+                    Maybe.withDefault "" <|
+                        config.elementToString columnDescriptor element
+            in
+            td [] [ text str ]
+    in
+    tr [ onClick <| wrapper element ] <|
+        List.map elementTd config.columnDescriptors
