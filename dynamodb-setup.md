@@ -40,4 +40,8 @@ Usually you can use "Default settings" and need no tags. You can edit these late
 
 Click the orange "Create table" button.
 
-It will take a few seconds to create the table. It will have a link on the "Tables" page when it's ready. There's a lot you can do from there, but you can often just write code (or use the example UI).
+It will take a few seconds to create the table. It will have a link on the "Tables" page when it's ready.
+
+Set the "Capacity Mode", high enough for your application. I use "On-demand".
+
+There's a lot you can do in the AWS console, but you can often just write code (or use the example UI).
