@@ -14,6 +14,7 @@ module DynamoDB.Types exposing
     ( TableName
     , Key(..), Item, AttributeValue(..)
     , Error(..), Account
+    , emptyAccount
     )
 
 {-| Types for DynamoDB module
@@ -24,6 +25,11 @@ module DynamoDB.Types exposing
 @docs TableName
 @docs Key, Item, AttributeValue
 @docs Error, Account
+
+
+# Utilities
+
+@docs emptyAccount
 
 -}
 
@@ -56,6 +62,21 @@ type alias Account =
     , accessKey : String
     , secretKey : String
     , tableName : TableName
+    }
+
+
+{-| An empty `DynamoDB.Account`.
+
+This belongs in the DynamoDB module. Move when adding this to that.
+
+-}
+emptyAccount : Account
+emptyAccount =
+    { name = "<empty>"
+    , region = Nothing
+    , accessKey = ""
+    , secretKey = ""
+    , tableName = ""
     }
 
 

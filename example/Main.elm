@@ -819,12 +819,23 @@ primaryKeyValue key =
             attributeValueToString value
 
 
+h1 : String -> Html msg
+h1 s =
+    Html.h1 [] [ text s ]
+
+
+h2 : String -> Html msg
+h2 s =
+    Html.h2 [] [ text s ]
+
+
 view : Model -> Html Msg
 view model =
     div
         [ style "margin-left" "3em"
         ]
         [ prettyTableCssClass
+        , h1 "DynamoDB Example"
         , p [ style "color" "red" ]
             [ text model.display ]
         , p []
@@ -834,6 +845,9 @@ view model =
             , b "Table Name: "
             , text model.account.tableName
             ]
+        , h2 "AppState API"
+        , text "TODO"
+        , h2 "DynamoDB API"
         , p []
             [ b "Key name: "
             , input
@@ -869,6 +883,10 @@ view model =
                 ]
                 []
             , br
+            , text "Fill in the text box above with JSON for an object each of whos values is a JSON object with a key of one of the DynamoDB types (e.g. \"N\" for number or \"S\" for string), and a value of the string encoding of the value)."
+            , br
+            , text "Example: {\"count\":{\"N\":\"42\"},\"value\":{\"S\":\"test-value\"}}"
+            , br
             , button [ onClick PutItem ]
                 [ text "PutItem" ]
             ]
@@ -878,7 +896,9 @@ view model =
 
             Just item ->
                 p []
-                    [ b "Item: "
+                    [ text "The Elm for the JSON in the text box above."
+                    , br
+                    , b "Item: "
                     , text <| Debug.toString (Dict.toList item)
                     ]
         , p []

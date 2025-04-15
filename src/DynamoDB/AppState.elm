@@ -17,7 +17,7 @@
 
 
 module DynamoDB.AppState exposing
-    ( AppState, makeAppState, emptyAccount
+    ( AppState, makeAppState
     , Error, accountIncomplete, save, idle
     , Updates, update, initialLoad
     , renderAccount
@@ -39,7 +39,7 @@ Call `update` to pull changes from DynamoDB, at `updatePeriod` intervals.
 
 # State
 
-@docs AppState, makeAppState, emptyAccount
+@docs AppState, makeAppState
 
 
 # Updating state
@@ -100,21 +100,6 @@ type alias AppState =
     , saveCount : Int
     , updates : Dict String (Maybe Value)
     , keyCounts : Dict String Int
-    }
-
-
-{-| An empty `DynamoDB.Account`.
-
-This belongs in the DynamoDB module. Move when adding this to that.
-
--}
-emptyAccount : Account
-emptyAccount =
-    { name = "<empty>"
-    , region = Nothing
-    , accessKey = ""
-    , secretKey = ""
-    , tableName = ""
     }
 
 
