@@ -22,7 +22,7 @@ import DynamoDB
         , TransactWrite(..)
         )
 import DynamoDB.EncodeDecode as ED
-import DynamoDB.Html exposing (renderItemTable)
+import DynamoDB.Html exposing (prettyTableCssClass, renderItemTable)
 import DynamoDB.Types
     exposing
         ( Account
@@ -824,7 +824,8 @@ view model =
     div
         [ style "margin-left" "3em"
         ]
-        [ p [ style "color" "red" ]
+        [ prettyTableCssClass
+        , p [ style "color" "red" ]
             [ text model.display ]
         , p []
             [ b "Account: "
