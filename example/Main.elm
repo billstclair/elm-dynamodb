@@ -21,6 +21,7 @@ import DynamoDB
         , TransactGetItemValue
         , TransactWrite(..)
         )
+import DynamoDB.AppState as AppState exposing (AppState, Updates)
 import DynamoDB.EncodeDecode as ED
 import DynamoDB.Html exposing (prettyTableCssClass, renderItemTable)
 import DynamoDB.Types
@@ -30,6 +31,7 @@ import DynamoDB.Types
         , Error(..)
         , Item
         , Key(..)
+        , TableName
         )
 import Html
     exposing
@@ -85,9 +87,16 @@ main =
 
 
 type alias Model =
-    { display : String
+    { time : Int
+    , display : String
     , accounts : List Account
     , account : Account
+    , appState : AppState
+    , columns : List String
+    , row : Row
+    , selection : Row
+    , rows : List Row
+    , columnName : String
     , key : Key
     , item : Maybe Item
     , text : String
@@ -128,11 +137,47 @@ type Msg
     | ReceiveAccounts (Result Error (List Account))
 
 
+emptyAccount : Account
+emptyAccount =
+    let
+        account =
+            DynamoDB.Types.emptyAccount
+    in
+    { account
+        | name = "mammudeck"
+        , tableName = "mammudeck"
+    }
+
+
+emptyAppState : AppState
+emptyAppState =
+    let
+        appState =
+            AppState.makeAppState emptyAccount
+    in
+    { appState
+        | keyPrefix = Just "_AppStateExample"
+        , idlePeriod = 2000
+        , updatePeriod = 2000
+    }
+
+
+type alias Row =
+    Dict String String
+
+
 init : () -> ( Model, Cmd Msg )
 init _ =
-    ( { display = "Fetching accounts..."
+    ( { time = 0
+      , display = "Fetching accounts..."
       , accounts = []
       , account = defaultAccount
+      , appState = emptyAppState
+      , columns = [ "key", "value" ]
+      , row = Dict.empty
+      , selection = Dict.empty
+      , rows = []
+      , columnName = "key"
       , key = SimpleKey ( "key", StringValue "test" )
       , item = Nothing
       , text = ""
