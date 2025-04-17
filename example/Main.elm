@@ -23,7 +23,7 @@ import DynamoDB
         )
 import DynamoDB.AppState as AppState exposing (AppState, Updates)
 import DynamoDB.EncodeDecode as ED
-import DynamoDB.Html exposing (prettyTableCssClass, renderItemTable)
+import DynamoDB.Html exposing (prettyTableCssClass, renderItemTable, renderTable)
 import DynamoDB.Types
     exposing
         ( Account
@@ -40,7 +40,6 @@ import Html
         , a
         , button
         , div
-        , h2
         , input
         , option
         , p
@@ -75,13 +74,14 @@ import Json.Decode as JD exposing (Decoder)
 import Json.Encode as JE exposing (Value)
 import List.Extra as LE
 import Task
+import Time exposing (Posix)
 
 
 main =
     Browser.element
         { init = init
         , update = update
-        , subscriptions = \_ -> Sub.none
+        , subscriptions = \_ -> Time.every 1000 Tick
         , view = view
         }
 
@@ -97,6 +97,9 @@ type alias Model =
     , selection : Row
     , rows : List Row
     , columnName : String
+
+    -- AppState example state above.
+    -- DynamoDB example state below
     , key : Key
     , item : Maybe Item
     , text : String
@@ -111,7 +114,19 @@ type alias Model =
 
 
 type Msg
-    = SetAccount String
+    = Tick Posix
+    | ReceiveAppStateUpdates (Result AppState.Error (Maybe Updates))
+    | ReceiveAppStateStore (Result AppState.Error Int)
+    | SaveRow (Maybe String) (Maybe Row)
+    | SetAccount String
+    | SetSelection Row
+    | SetColumnName String
+    | SetRowColumn String String
+    | AddRow
+    | RemoveRow
+    | UpdateRow
+      -- AppState example above
+      -- DynanoDB example below
     | SetKeyName String
     | SetKeyValue String
     | SetText String
@@ -574,9 +589,164 @@ findAccount model name =
             a
 
 
+sortRows : List Row -> List Row
+sortRows rows =
+    List.sortBy (\x -> Maybe.withDefault "" <| Dict.get "key" x) rows
+
+
+saveRow : Maybe String -> Maybe Row -> Cmd Msg
+saveRow key row =
+    Task.perform (SaveRow key) <| Task.succeed row
+
+
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
+        Tick posix ->
+            let
+                time =
+                    Time.posixToMillis posix
+
+                ( mdl, cmd ) =
+                    if AppState.accountIncomplete model.appState then
+                        ( model, Cmd.none )
+
+                    else
+                        case AppState.idle time model.appState of
+                            Nothing ->
+                                case AppState.update time model.appState of
+                                    Nothing ->
+                                        ( model, Cmd.none )
+
+                                    Just ( appState, task ) ->
+                                        ( { model | appState = appState }
+                                        , Task.attempt ReceiveAppStateUpdates task
+                                        )
+
+                            Just ( appState, task ) ->
+                                ( { model | appState = appState }
+                                , Task.attempt ReceiveAppStateStore task
+                                )
+            in
+            ( { mdl | time = time }
+            , cmd
+            )
+
+        ReceiveAppStateUpdates result ->
+            case result of
+                Err err ->
+                    ( { model | display = Debug.toString err }
+                    , Cmd.none
+                    )
+
+                Ok Nothing ->
+                    ( model, Cmd.none )
+
+                Ok (Just updates) ->
+                    let
+                        appState =
+                            model.appState
+
+                        folder k mv rowsTail =
+                            case mv of
+                                Nothing ->
+                                    rowsTail
+
+                                Just v ->
+                                    Dict.fromList [ ( "key", k ), ( "value", v ) ]
+                                        :: rowsTail
+
+                        oldRows =
+                            List.filter
+                                (\row ->
+                                    case Dict.get "key" row of
+                                        Nothing ->
+                                            True
+
+                                        Just k ->
+                                            Nothing
+                                                == Dict.get k updates.updates
+                                )
+                                model.rows
+
+                        rows =
+                            Dict.foldr folder oldRows updates.updates
+                    in
+                    ( { model
+                        | display =
+                            if model.appState.saveCount == 0 then
+                                "InitialLoad received."
+
+                            else
+                                "Updates received."
+                        , appState =
+                            { appState
+                                | saveCount = updates.saveCount
+                                , keyCounts = updates.keyCounts
+                            }
+                        , rows = sortRows rows
+                      }
+                    , Cmd.none
+                    )
+
+        ReceiveAppStateStore result ->
+            case result of
+                Err err ->
+                    ( { model | display = Debug.toString err }
+                    , Cmd.none
+                    )
+
+                Ok count ->
+                    if count == 0 then
+                        -- Nothing actually done
+                        ( model, Cmd.none )
+
+                    else
+                        ( { model
+                            | display =
+                                "Saved " ++ String.fromInt count ++ " items."
+                          }
+                        , Cmd.none
+                        )
+
+        SaveRow key row ->
+            case key of
+                Nothing ->
+                    ( model, Cmd.none )
+
+                Just k ->
+                    let
+                        val =
+                            case row of
+                                Nothing ->
+                                    Nothing
+
+                                Just mv ->
+                                    case Dict.get "value" mv of
+                                        Nothing ->
+                                            Nothing
+
+                                        Just v ->
+                                            Just <| JE.string v
+                    in
+                    if AppState.accountIncomplete model.appState then
+                        ( { model
+                            | display =
+                                "Can't save to DynamoDB: account incomplete."
+                          }
+                        , Cmd.none
+                        )
+
+                    else
+                        case AppState.save model.time k val model.appState of
+                            Nothing ->
+                                ( model, Cmd.none )
+
+                            Just ( appState, task ) ->
+                                ( { model | appState = appState }
+                                , Task.attempt ReceiveAppStateStore task
+                                )
+
         SetAccount name ->
             let
                 account =
@@ -588,6 +758,91 @@ update msg model =
               }
             , Cmd.none
             )
+
+        SetSelection row ->
+            ( { model
+                | selection = row
+                , row = row
+              }
+            , Cmd.none
+            )
+
+        SetColumnName name ->
+            ( { model | columnName = name }
+            , Cmd.none
+            )
+
+        SetRowColumn columnName v ->
+            let
+                row =
+                    if v == "" then
+                        Dict.remove columnName model.row
+
+                    else
+                        Dict.insert columnName v model.row
+            in
+            ( { model | row = row }
+            , Cmd.none
+            )
+
+        AddRow ->
+            let
+                keyValue =
+                    Dict.get "key" model.row
+            in
+            case LE.find (\row -> Dict.get "key" row == keyValue) model.rows of
+                Just _ ->
+                    update UpdateRow model
+
+                Nothing ->
+                    ( { model
+                        | selection = model.row
+                        , rows =
+                            model.rows ++ [ model.row ] |> sortRows
+                      }
+                    , saveRow keyValue <| Just model.row
+                    )
+
+        RemoveRow ->
+            let
+                keyValue =
+                    Dict.get "key" model.row
+            in
+            ( { model
+                | selection =
+                    case keyValue of
+                        Nothing ->
+                            Dict.empty
+
+                        _ ->
+                            model.selection
+                , rows = LE.filterNot ((==) keyValue << Dict.get "key") model.rows
+              }
+            , saveRow keyValue Nothing
+            )
+
+        UpdateRow ->
+            case Dict.get "key" model.row of
+                Nothing ->
+                    ( model, Cmd.none )
+
+                keyValue ->
+                    ( { model
+                        | selection = model.row
+                        , rows =
+                            List.map
+                                (\row ->
+                                    if Dict.get "key" row == keyValue then
+                                        model.row
+
+                                    else
+                                        row
+                                )
+                                model.rows
+                                |> sortRows
+                      }
+                    , saveRow keyValue <| Just model.row
+                    )
 
         SetKeyName name ->
             let
@@ -890,9 +1145,88 @@ view model =
             , b "Table Name: "
             , text model.account.tableName
             ]
-        , h2 "AppState API"
-        , text "TODO"
-        , h2 "DynamoDB API"
+        , viewAppStateExample model
+        , viewDynamoDBExample model
+        ]
+
+
+rowTable : Row -> Model -> Html Msg
+rowTable row model =
+    let
+        columnTh columnName =
+            th [] [ text columnName ]
+
+        columnTd columnName =
+            let
+                v =
+                    case Dict.get columnName model.row of
+                        Nothing ->
+                            ""
+
+                        Just s ->
+                            s
+            in
+            td []
+                [ input
+                    [ value v
+                    , size 20
+                    , onInput <| SetRowColumn columnName
+                    ]
+                    []
+                ]
+    in
+    table [ class "prettytable" ] <|
+        tr [] (List.map columnTh model.columns)
+            :: List.map columnTd model.columns
+
+
+viewAppStateExample : Model -> Html Msg
+viewAppStateExample model =
+    let
+        addSelectionMarker row =
+            if row == model.selection then
+                Dict.insert "*" "*" row
+
+            else
+                row
+    in
+    div [ style "margin" "8px" ]
+        [ h2 "AppState Example"
+        , p []
+            [ rowTable model.row model
+            , button [ onClick AddRow ]
+                [ text "Add" ]
+            , text " "
+            , button [ onClick RemoveRow ]
+                [ text "Remove" ]
+            , text " "
+            , button [ onClick UpdateRow ]
+                [ text "Update" ]
+            ]
+        , p []
+            [ renderTable SetSelection
+                { tableConfig | columnDescriptors = "*" :: model.columns }
+                (List.map addSelectionMarker model.rows)
+            ]
+        ]
+
+
+tableConfig =
+    { columnDescriptors = []
+    , columnDescriptorToString = identity
+    , elementToString = getRowValue
+    }
+
+
+getRowValue : String -> Row -> Maybe String
+getRowValue column row =
+    Dict.get column row
+
+
+viewDynamoDBExample : Model -> Html Msg
+viewDynamoDBExample model =
+    span []
+        [ h2 "DynamoDB Example"
         , p []
             [ b "Key name: "
             , input
@@ -928,7 +1262,7 @@ view model =
                 ]
                 []
             , br
-            , text "Fill in the text box above with JSON for an object each of whos values is a JSON object with a key of one of the DynamoDB types (e.g. \"N\" for number or \"S\" for string), and a value of the string encoding of the value)."
+            , text "Fill in the text box above with JSON for an object each of whose values is a JSON object with a key of one of the DynamoDB types (e.g. \"N\" for number or \"S\" for string), and a value of the string encoding of the value)."
             , br
             , text "Example: {\"count\":{\"N\":\"42\"},\"value\":{\"S\":\"test-value\"}}"
             , br
