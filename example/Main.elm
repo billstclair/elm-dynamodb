@@ -732,7 +732,8 @@ update msg model =
                     if AppState.accountIncomplete model.appState then
                         ( { model
                             | display =
-                                "Can't save to DynamoDB: account incomplete."
+                                "Can't save to DynamoDB: account incomplete:"
+                                    ++ Debug.toString model.appState
                           }
                         , Cmd.none
                         )
@@ -751,10 +752,14 @@ update msg model =
             let
                 account =
                     findAccount model name
+
+                appState =
+                    model.appState
             in
             ( { model
                 | account = account
                 , display = "Account: " ++ name
+                , appState = { appState | account = account }
               }
             , Cmd.none
             )
@@ -1028,10 +1033,14 @@ update msg model =
 
                                 _ ->
                                     defaultAccount
+
+                        appState =
+                            model.appState
                     in
                     ( { model
                         | accounts = accounts
                         , account = account
+                        , appState = { appState | account = account }
                         , display = "Accounts received."
                       }
                     , Cmd.none
