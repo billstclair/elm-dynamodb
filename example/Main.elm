@@ -115,6 +115,7 @@ type alias Model =
 
 type Msg
     = Tick Posix
+    | Delay Msg
     | ReceiveAppStateUpdates (Result AppState.Error (Maybe Updates))
     | ReceiveAppStateStore (Result AppState.Error Int)
     | SaveRow (Maybe String) (Maybe Row)
@@ -631,6 +632,9 @@ update msg model =
             ( { mdl | time = time }
             , cmd
             )
+
+        Delay msg2 ->
+            ( model, Task.perform Task.succeed msg2 )
 
         ReceiveAppStateUpdates result ->
             case result of
