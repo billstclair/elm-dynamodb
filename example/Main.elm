@@ -236,7 +236,14 @@ receiveGetItem : Key -> Result Error ( Metadata, Maybe Item ) -> Model -> ( Mode
 receiveGetItem key result model =
     case result of
         Err err ->
-            ( { model | display = Debug.toString err }
+            let
+                keystr =
+                    "key: " ++ Debug.toString key
+            in
+            ( { model
+                | display =
+                    "receiveGetItem, " ++ keystr ++ ", " ++ Debug.toString err
+              }
             , Cmd.none
             )
 
@@ -350,7 +357,7 @@ receiveScan result model =
     case result of
         Err err ->
             ( { model
-                | display = Debug.toString err
+                | display = "receiveScan: " ++ Debug.toString err
                 , metadata = Nothing
               }
             , Cmd.none
@@ -535,7 +542,7 @@ receiveTransactGetItems result model =
     case result of
         Err err ->
             ( { model
-                | display = Debug.toString err
+                | display = "ReceiveTransactGetItems: " ++ Debug.toString err
                 , metadata = Nothing
               }
             , Cmd.none
@@ -639,7 +646,10 @@ update msg model =
         ReceiveAppStateUpdates result ->
             case result of
                 Err err ->
-                    ( { model | display = Debug.toString err }
+                    ( { model
+                        | display =
+                            "ReceiveAppStateUpdates: " ++ Debug.toString err
+                      }
                     , Cmd.none
                     )
 
@@ -696,7 +706,10 @@ update msg model =
         ReceiveAppStateStore result ->
             case result of
                 Err err ->
-                    ( { model | display = Debug.toString err }
+                    ( { model
+                        | display =
+                            "RecieveAppStateStore: " ++ Debug.toString err
+                      }
                     , Cmd.none
                     )
 
@@ -1024,7 +1037,7 @@ update msg model =
         ReceiveAccounts result ->
             case result of
                 Err err ->
-                    ( { model | display = Debug.toString err }
+                    ( { model | display = "ReceiveAccounts: " ++ Debug.toString err }
                     , Cmd.none
                     )
 
@@ -1075,7 +1088,7 @@ receiveEmptyResult : String -> Maybe Key -> Result Error Metadata -> Model -> ( 
 receiveEmptyResult label maybeKey result model =
     case result of
         Err err ->
-            ( { model | display = Debug.toString err }
+            ( { model | display = "receiveEmptyResult: " ++ Debug.toString err }
             , Cmd.none
             )
 
