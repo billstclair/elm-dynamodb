@@ -121,7 +121,6 @@ type Msg
     | SaveRow (Maybe String) (Maybe Row)
     | SetAccount String
     | SetSelection Row
-    | SetColumnName String
     | SetRowColumn String String
     | AddRow
     | RemoveRow
@@ -607,461 +606,490 @@ saveRow key row =
     Task.perform (SaveRow key) <| Task.succeed row
 
 
+msgCmd : Msg -> Cmd Msg
+msgCmd msg =
+    Task.succeed msg |> Task.perform identity
+
+
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
-    case msg of
-        Tick posix ->
-            let
-                time =
-                    Time.posixToMillis posix
+    let
+        needDelay =
+            if AppState.isIdleTime model.time model.appState then
+                False
 
-                ( mdl, cmd ) =
-                    if AppState.accountIncomplete model.appState then
+            else
+                case msg of
+                    SaveRow _ _ ->
+                        True
+
+                    SetSelection _ ->
+                        True
+
+                    AddRow ->
+                        True
+
+                    RemoveRow ->
+                        True
+
+                    UpdateRow ->
+                        True
+
+                    _ ->
+                        False
+    in
+    if needDelay then
+        ( model, msgCmd <| Delay msg )
+
+    else
+        case msg of
+            Tick posix ->
+                let
+                    time =
+                        Time.posixToMillis posix
+
+                    ( mdl, cmd ) =
+                        if AppState.accountIncomplete model.appState then
+                            ( model, Cmd.none )
+
+                        else
+                            case AppState.idle time model.appState of
+                                Nothing ->
+                                    case AppState.update time model.appState of
+                                        Nothing ->
+                                            ( model, Cmd.none )
+
+                                        Just ( appState, task ) ->
+                                            ( { model | appState = appState }
+                                            , Task.attempt ReceiveAppStateUpdates task
+                                            )
+
+                                Just ( appState, task ) ->
+                                    ( { model | appState = appState }
+                                    , Task.attempt ReceiveAppStateStore task
+                                    )
+                in
+                ( { mdl | time = time }
+                , cmd
+                )
+
+            Delay msg2 ->
+                ( model, msgCmd msg2 )
+
+            ReceiveAppStateUpdates result ->
+                case result of
+                    Err err ->
+                        ( { model
+                            | display =
+                                "ReceiveAppStateUpdates: " ++ Debug.toString err
+                          }
+                        , Cmd.none
+                        )
+
+                    Ok Nothing ->
                         ( model, Cmd.none )
 
-                    else
-                        case AppState.idle time model.appState of
-                            Nothing ->
-                                case AppState.update time model.appState of
+                    Ok (Just updates) ->
+                        let
+                            appState =
+                                model.appState
+
+                            folder k mv rowsTail =
+                                case mv of
                                     Nothing ->
-                                        ( model, Cmd.none )
+                                        rowsTail
 
-                                    Just ( appState, task ) ->
-                                        ( { model | appState = appState }
-                                        , Task.attempt ReceiveAppStateUpdates task
-                                        )
+                                    Just v ->
+                                        Dict.fromList [ ( "key", k ), ( "value", v ) ]
+                                            :: rowsTail
 
-                            Just ( appState, task ) ->
-                                ( { model | appState = appState }
-                                , Task.attempt ReceiveAppStateStore task
-                                )
-            in
-            ( { mdl | time = time }
-            , cmd
-            )
+                            oldRows =
+                                List.filter
+                                    (\row ->
+                                        case Dict.get "key" row of
+                                            Nothing ->
+                                                True
 
-        Delay msg2 ->
-            ( model, Task.perform Task.succeed msg2 )
+                                            Just k ->
+                                                Nothing
+                                                    == Dict.get k updates.updates
+                                    )
+                                    model.rows
 
-        ReceiveAppStateUpdates result ->
-            case result of
-                Err err ->
-                    ( { model
-                        | display =
-                            "ReceiveAppStateUpdates: " ++ Debug.toString err
-                      }
-                    , Cmd.none
-                    )
+                            rows =
+                                Dict.foldr folder oldRows updates.updates
+                        in
+                        ( { model
+                            | display =
+                                if model.appState.saveCount == 0 then
+                                    "InitialLoad received."
 
-                Ok Nothing ->
-                    ( model, Cmd.none )
+                                else
+                                    "Updates received."
+                            , appState =
+                                { appState
+                                    | saveCount = updates.saveCount
+                                    , keyCounts = updates.keyCounts
+                                }
+                            , rows = sortRows rows
+                          }
+                        , Cmd.none
+                        )
 
-                Ok (Just updates) ->
-                    let
-                        appState =
-                            model.appState
+            ReceiveAppStateStore result ->
+                case result of
+                    Err err ->
+                        ( { model
+                            | display =
+                                "RecieveAppStateStore: " ++ Debug.toString err
+                          }
+                        , Cmd.none
+                        )
 
-                        folder k mv rowsTail =
-                            case mv of
-                                Nothing ->
-                                    rowsTail
+                    Ok count ->
+                        if count == 0 then
+                            -- Nothing actually done
+                            ( model, Cmd.none )
 
-                                Just v ->
-                                    Dict.fromList [ ( "key", k ), ( "value", v ) ]
-                                        :: rowsTail
+                        else
+                            ( { model
+                                | display =
+                                    "Saved " ++ String.fromInt count ++ " items."
+                              }
+                            , Cmd.none
+                            )
 
-                        oldRows =
-                            List.filter
-                                (\row ->
-                                    case Dict.get "key" row of
-                                        Nothing ->
-                                            True
-
-                                        Just k ->
-                                            Nothing
-                                                == Dict.get k updates.updates
-                                )
-                                model.rows
-
-                        rows =
-                            Dict.foldr folder oldRows updates.updates
-                    in
-                    ( { model
-                        | display =
-                            if model.appState.saveCount == 0 then
-                                "InitialLoad received."
-
-                            else
-                                "Updates received."
-                        , appState =
-                            { appState
-                                | saveCount = updates.saveCount
-                                , keyCounts = updates.keyCounts
-                            }
-                        , rows = sortRows rows
-                      }
-                    , Cmd.none
-                    )
-
-        ReceiveAppStateStore result ->
-            case result of
-                Err err ->
-                    ( { model
-                        | display =
-                            "RecieveAppStateStore: " ++ Debug.toString err
-                      }
-                    , Cmd.none
-                    )
-
-                Ok count ->
-                    if count == 0 then
-                        -- Nothing actually done
+            SaveRow key row ->
+                case key of
+                    Nothing ->
                         ( model, Cmd.none )
 
-                    else
-                        ( { model
-                            | display =
-                                "Saved " ++ String.fromInt count ++ " items."
-                          }
-                        , Cmd.none
-                        )
+                    Just k ->
+                        let
+                            val =
+                                case row of
+                                    Nothing ->
+                                        Nothing
 
-        SaveRow key row ->
-            case key of
-                Nothing ->
-                    ( model, Cmd.none )
+                                    Just mv ->
+                                        case Dict.get "value" mv of
+                                            Nothing ->
+                                                Nothing
 
-                Just k ->
-                    let
-                        val =
-                            case row of
+                                            Just v ->
+                                                Just <| JE.string v
+                        in
+                        if AppState.accountIncomplete model.appState then
+                            ( { model
+                                | display =
+                                    "Can't save to DynamoDB: account incomplete:"
+                                        ++ Debug.toString model.appState
+                              }
+                            , Cmd.none
+                            )
+
+                        else
+                            case AppState.save model.time k val model.appState of
                                 Nothing ->
-                                    Nothing
+                                    ( model, Cmd.none )
 
-                                Just mv ->
-                                    case Dict.get "value" mv of
-                                        Nothing ->
-                                            Nothing
+                                Just ( appState, task ) ->
+                                    ( { model | appState = appState }
+                                    , Task.attempt ReceiveAppStateStore task
+                                    )
 
-                                        Just v ->
-                                            Just <| JE.string v
-                    in
-                    if AppState.accountIncomplete model.appState then
-                        ( { model
-                            | display =
-                                "Can't save to DynamoDB: account incomplete:"
-                                    ++ Debug.toString model.appState
-                          }
-                        , Cmd.none
-                        )
+            SetAccount name ->
+                let
+                    account =
+                        findAccount model name
 
-                    else
-                        case AppState.save model.time k val model.appState of
-                            Nothing ->
-                                ( model, Cmd.none )
-
-                            Just ( appState, task ) ->
-                                ( { model | appState = appState }
-                                , Task.attempt ReceiveAppStateStore task
-                                )
-
-        SetAccount name ->
-            let
-                account =
-                    findAccount model name
-
-                appState =
-                    model.appState
-            in
-            ( { model
-                | account = account
-                , display = "Account: " ++ name
-                , appState = { appState | account = account }
-              }
-            , Cmd.none
-            )
-
-        SetSelection row ->
-            ( { model
-                | selection = row
-                , row = row
-              }
-            , Cmd.none
-            )
-
-        SetColumnName name ->
-            ( { model | columnName = name }
-            , Cmd.none
-            )
-
-        SetRowColumn columnName v ->
-            let
-                row =
-                    if v == "" then
-                        Dict.remove columnName model.row
-
-                    else
-                        Dict.insert columnName v model.row
-            in
-            ( { model | row = row }
-            , Cmd.none
-            )
-
-        AddRow ->
-            let
-                keyValue =
-                    Dict.get "key" model.row
-            in
-            case LE.find (\row -> Dict.get "key" row == keyValue) model.rows of
-                Just _ ->
-                    update UpdateRow model
-
-                Nothing ->
-                    ( { model
-                        | selection = model.row
-                        , rows =
-                            model.rows ++ [ model.row ] |> sortRows
-                      }
-                    , saveRow keyValue <| Just model.row
-                    )
-
-        RemoveRow ->
-            let
-                keyValue =
-                    Dict.get "key" model.row
-            in
-            ( { model
-                | selection =
-                    case keyValue of
-                        Nothing ->
-                            Dict.empty
-
-                        _ ->
-                            model.selection
-                , rows = LE.filterNot ((==) keyValue << Dict.get "key") model.rows
-              }
-            , saveRow keyValue Nothing
-            )
-
-        UpdateRow ->
-            case Dict.get "key" model.row of
-                Nothing ->
-                    ( model, Cmd.none )
-
-                keyValue ->
-                    ( { model
-                        | selection = model.row
-                        , rows =
-                            List.map
-                                (\row ->
-                                    if Dict.get "key" row == keyValue then
-                                        model.row
-
-                                    else
-                                        row
-                                )
-                                model.rows
-                                |> sortRows
-                      }
-                    , saveRow keyValue <| Just model.row
-                    )
-
-        SetKeyName name ->
-            let
-                key =
-                    case model.key of
-                        SimpleKey ( k, v ) ->
-                            SimpleKey ( name, v )
-
-                        x ->
-                            x
-            in
-            ( { model | key = key }
-            , Cmd.none
-            )
-
-        SetKeyValue value ->
-            let
-                key =
-                    case model.key of
-                        SimpleKey ( k, v ) ->
-                            SimpleKey ( k, StringValue value )
-
-                        x ->
-                            x
-            in
-            ( { model | key = key }
-            , Cmd.none
-            )
-
-        SetText text ->
-            ( { model | text = text }
-            , Cmd.none
-            )
-
-        SetLimit text ->
-            ( { model | limit = text }
-            , Cmd.none
-            )
-
-        SetTransactKeys text ->
-            ( { model | transactKeys = text }
-            , Cmd.none
-            )
-
-        SetTransactAttributeNames text ->
-            ( { model | transactAttributeNames = text }
-            , Cmd.none
-            )
-
-        SetTransactDeletedKeys text ->
-            ( { model | transactDeletedKeys = text }
-            , Cmd.none
-            )
-
-        SetTransactIncrement text ->
-            ( { model | transactIncrement = text }
-            , Cmd.none
-            )
-
-        ClearLastEvaluatedKey ->
-            case model.scanValue of
-                Nothing ->
-                    ( model, Cmd.none )
-
-                Just v ->
-                    ( { model
-                        | scanValue =
-                            Just { v | lastEvaluatedKey = Nothing }
-                      }
-                    , Cmd.none
-                    )
-
-        ClickScanItem item ->
-            let
-                keyName =
-                    case model.key of
-                        SimpleKey ( name, _ ) ->
-                            name
-
-                        _ ->
-                            ""
-
-                mdl =
-                    { model
-                        | item = Nothing
-                        , text = ""
-                    }
-            in
-            if keyName == "" then
-                ( { mdl | display = "\"Key name\" is blank." }
+                    appState =
+                        model.appState
+                in
+                ( { model
+                    | account = account
+                    , display = "Account: " ++ name
+                    , appState = { appState | account = account }
+                  }
                 , Cmd.none
                 )
 
-            else
-                case Dict.get keyName item of
+            SetSelection row ->
+                ( { model
+                    | selection = row
+                    , row = row
+                  }
+                , Cmd.none
+                )
+
+            SetRowColumn columnName v ->
+                let
+                    row =
+                        if v == "" then
+                            Dict.remove columnName model.row
+
+                        else
+                            Dict.insert columnName v model.row
+                in
+                ( { model | row = row }
+                , Cmd.none
+                )
+
+            AddRow ->
+                let
+                    keyValue =
+                        Dict.get "key" model.row
+                in
+                case LE.find (\row -> Dict.get "key" row == keyValue) model.rows of
+                    Just _ ->
+                        update UpdateRow model
+
                     Nothing ->
-                        ( { mdl
-                            | display =
-                                "Clicked item has no attribute named \""
-                                    ++ keyName
-                                    ++ "\"."
+                        ( { model
+                            | selection = model.row
+                            , rows =
+                                model.rows ++ [ model.row ] |> sortRows
+                          }
+                        , saveRow keyValue <| Just model.row
+                        )
+
+            RemoveRow ->
+                let
+                    keyValue =
+                        Dict.get "key" model.row
+                in
+                ( { model
+                    | selection =
+                        case keyValue of
+                            Nothing ->
+                                Dict.empty
+
+                            _ ->
+                                model.selection
+                    , rows = LE.filterNot ((==) keyValue << Dict.get "key") model.rows
+                  }
+                , saveRow keyValue Nothing
+                )
+
+            UpdateRow ->
+                case Dict.get "key" model.row of
+                    Nothing ->
+                        ( model, Cmd.none )
+
+                    keyValue ->
+                        ( { model
+                            | selection = model.row
+                            , rows =
+                                List.map
+                                    (\row ->
+                                        if Dict.get "key" row == keyValue then
+                                            model.row
+
+                                        else
+                                            row
+                                    )
+                                    model.rows
+                                    |> sortRows
+                          }
+                        , saveRow keyValue <| Just model.row
+                        )
+
+            SetKeyName name ->
+                let
+                    key =
+                        case model.key of
+                            SimpleKey ( k, v ) ->
+                                SimpleKey ( name, v )
+
+                            x ->
+                                x
+                in
+                ( { model | key = key }
+                , Cmd.none
+                )
+
+            SetKeyValue value ->
+                let
+                    key =
+                        case model.key of
+                            SimpleKey ( k, v ) ->
+                                SimpleKey ( k, StringValue value )
+
+                            x ->
+                                x
+                in
+                ( { model | key = key }
+                , Cmd.none
+                )
+
+            SetText text ->
+                ( { model | text = text }
+                , Cmd.none
+                )
+
+            SetLimit text ->
+                ( { model | limit = text }
+                , Cmd.none
+                )
+
+            SetTransactKeys text ->
+                ( { model | transactKeys = text }
+                , Cmd.none
+                )
+
+            SetTransactAttributeNames text ->
+                ( { model | transactAttributeNames = text }
+                , Cmd.none
+                )
+
+            SetTransactDeletedKeys text ->
+                ( { model | transactDeletedKeys = text }
+                , Cmd.none
+                )
+
+            SetTransactIncrement text ->
+                ( { model | transactIncrement = text }
+                , Cmd.none
+                )
+
+            ClearLastEvaluatedKey ->
+                case model.scanValue of
+                    Nothing ->
+                        ( model, Cmd.none )
+
+                    Just v ->
+                        ( { model
+                            | scanValue =
+                                Just { v | lastEvaluatedKey = Nothing }
                           }
                         , Cmd.none
                         )
 
-                    Just value ->
-                        case value of
-                            StringValue _ ->
-                                let
-                                    key =
-                                        SimpleKey ( keyName, value )
-                                in
-                                ( { mdl
-                                    | key = key
-                                    , item = Just item
-                                    , text =
-                                        DynamoDB.removeKeyFields key item
-                                            |> itemToText
-                                    , display = "Row ready for editing."
-                                  }
-                                , Cmd.none
-                                )
+            ClickScanItem item ->
+                let
+                    keyName =
+                        case model.key of
+                            SimpleKey ( name, _ ) ->
+                                name
 
                             _ ->
-                                ( { mdl
-                                    | display =
-                                        "Non-string value for attribute named \""
-                                            ++ keyName
-                                            ++ "\"."
-                                  }
-                                , Cmd.none
-                                )
+                                ""
 
-        GetItem ->
-            getItem model
-
-        PutItem ->
-            putItem model
-
-        DeleteItem ->
-            deleteItem model
-
-        Scan ->
-            scan model
-
-        TransactGetItems ->
-            transactGetItems model
-
-        TransactWriteItems ->
-            transactWriteItems model
-
-        ReceiveGetItem key result ->
-            receiveGetItem key result model
-
-        ReceivePutItem key result ->
-            receiveEmptyResult "Put" (Just key) result model
-
-        ReceiveDeleteItem key result ->
-            receiveEmptyResult "Deleted" (Just key) result model
-
-        ReceiveScan result ->
-            receiveScan result model
-
-        ReceiveTransactGetItems result ->
-            receiveTransactGetItems result model
-
-        ReceiveTransactWriteItems result ->
-            receiveEmptyResult "TransactWriteItems successful." Nothing result model
-
-        ReceiveAccounts result ->
-            case result of
-                Err err ->
-                    ( { model | display = "ReceiveAccounts: " ++ Debug.toString err }
+                    mdl =
+                        { model
+                            | item = Nothing
+                            , text = ""
+                        }
+                in
+                if keyName == "" then
+                    ( { mdl | display = "\"Key name\" is blank." }
                     , Cmd.none
                     )
 
-                Ok accounts ->
-                    let
-                        account =
-                            case accounts of
-                                a :: _ ->
-                                    a
+                else
+                    case Dict.get keyName item of
+                        Nothing ->
+                            ( { mdl
+                                | display =
+                                    "Clicked item has no attribute named \""
+                                        ++ keyName
+                                        ++ "\"."
+                              }
+                            , Cmd.none
+                            )
+
+                        Just value ->
+                            case value of
+                                StringValue _ ->
+                                    let
+                                        key =
+                                            SimpleKey ( keyName, value )
+                                    in
+                                    ( { mdl
+                                        | key = key
+                                        , item = Just item
+                                        , text =
+                                            DynamoDB.removeKeyFields key item
+                                                |> itemToText
+                                        , display = "Row ready for editing."
+                                      }
+                                    , Cmd.none
+                                    )
 
                                 _ ->
-                                    defaultAccount
+                                    ( { mdl
+                                        | display =
+                                            "Non-string value for attribute named \""
+                                                ++ keyName
+                                                ++ "\"."
+                                      }
+                                    , Cmd.none
+                                    )
 
-                        appState =
-                            model.appState
-                    in
-                    ( { model
-                        | accounts = accounts
-                        , account = account
-                        , appState = { appState | account = account }
-                        , display = "Accounts received."
-                      }
-                    , Cmd.none
-                    )
+            GetItem ->
+                getItem model
+
+            PutItem ->
+                putItem model
+
+            DeleteItem ->
+                deleteItem model
+
+            Scan ->
+                scan model
+
+            TransactGetItems ->
+                transactGetItems model
+
+            TransactWriteItems ->
+                transactWriteItems model
+
+            ReceiveGetItem key result ->
+                receiveGetItem key result model
+
+            ReceivePutItem key result ->
+                receiveEmptyResult "Put" (Just key) result model
+
+            ReceiveDeleteItem key result ->
+                receiveEmptyResult "Deleted" (Just key) result model
+
+            ReceiveScan result ->
+                receiveScan result model
+
+            ReceiveTransactGetItems result ->
+                receiveTransactGetItems result model
+
+            ReceiveTransactWriteItems result ->
+                receiveEmptyResult "TransactWriteItems successful." Nothing result model
+
+            ReceiveAccounts result ->
+                case result of
+                    Err err ->
+                        ( { model | display = "ReceiveAccounts: " ++ Debug.toString err }
+                        , Cmd.none
+                        )
+
+                    Ok accounts ->
+                        let
+                            account =
+                                case accounts of
+                                    a :: _ ->
+                                        a
+
+                                    _ ->
+                                        defaultAccount
+
+                            appState =
+                                model.appState
+                        in
+                        ( { model
+                            | accounts = accounts
+                            , account = account
+                            , appState = { appState | account = account }
+                            , display = "Accounts received."
+                          }
+                        , Cmd.none
+                        )
 
 
 checkKey : Model -> (() -> ( Model, Cmd Msg )) -> ( Model, Cmd Msg )

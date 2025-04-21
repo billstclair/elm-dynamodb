@@ -18,7 +18,7 @@
 
 module DynamoDB.AppState exposing
     ( AppState, makeAppState
-    , Error, accountIncomplete, save, idle
+    , Error, accountIncomplete, save, idle, isIdleTime
     , Updates, update, initialLoad
     , renderAccount
     , store, mergeAccount
@@ -44,7 +44,7 @@ Call `update` to pull changes from DynamoDB, at `updatePeriod` intervals.
 
 # Updating state
 
-@docs Error, accountIncomplete, save, idle
+@docs Error, accountIncomplete, save, idle, isIdleTime
 
 
 # Getting updates from other browsers.
@@ -191,11 +191,18 @@ save time key value appState =
         store time state
 
 
+{-| Is it time to query the database for updates from other apps?
+-}
+isIdleTime : Int -> AppState -> Bool
+isIdleTime time appState =
+    time > appState.lastIdleTime + appState.idlePeriod
+
+
 {-| Push the saved changes to DynamoDB if the idle time has elapsed.
 -}
 idle : Int -> AppState -> Maybe ( AppState, Task Error Int )
 idle time appState =
-    if time <= appState.lastIdleTime + appState.idlePeriod then
+    if not <| isIdleTime time appState then
         Nothing
 
     else
@@ -225,7 +232,7 @@ in the database).
 -}
 update : Int -> AppState -> Maybe ( AppState, Task Error (Maybe Updates) )
 update time appState =
-    if time <= appState.lastUpdateTime + appState.updatePeriod then
+    if not <| isIdleTime time appState then
         Nothing
 
     else
