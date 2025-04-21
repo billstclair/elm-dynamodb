@@ -92,6 +92,7 @@ type alias Model =
     , accounts : List Account
     , account : Account
     , appState : AppState
+    , isIdle : Bool
     , columns : List String
     , row : Row
     , selection : Row
@@ -188,6 +189,7 @@ init _ =
       , accounts = []
       , account = defaultAccount
       , appState = emptyAppState
+      , isIdle = False
       , columns = [ "key", "value" ]
       , row = Dict.empty
       , selection = Dict.empty
