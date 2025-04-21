@@ -92,7 +92,7 @@ type alias Model =
     , accounts : List Account
     , account : Account
     , appState : AppState
-    , isIdle : Bool
+    , delayedCmd : Maybe (Cmd Msg)
     , columns : List String
     , row : Row
     , selection : Row
@@ -189,7 +189,7 @@ init _ =
       , accounts = []
       , account = defaultAccount
       , appState = emptyAppState
-      , isIdle = False
+      , delayedCmd = Nothing
       , columns = [ "key", "value" ]
       , row = Dict.empty
       , selection = Dict.empty
@@ -617,31 +617,35 @@ update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     let
         needDelay =
-            if AppState.isIdleTime model.time model.appState then
-                False
+            case msg of
+                SaveRow _ _ ->
+                    True
 
-            else
-                case msg of
-                    SaveRow _ _ ->
-                        True
+                SetSelection _ ->
+                    True
 
-                    SetSelection _ ->
-                        True
+                AddRow ->
+                    True
 
-                    AddRow ->
-                        True
+                RemoveRow ->
+                    True
 
-                    RemoveRow ->
-                        True
+                UpdateRow ->
+                    True
 
-                    UpdateRow ->
-                        True
-
-                    _ ->
-                        False
+                _ ->
+                    False
     in
     if needDelay then
-        ( model, msgCmd <| Delay msg )
+        let
+            appState =
+                model.appState
+        in
+        update (Tick <| Time.millisToPosix model.time)
+            { model
+                | appState = { appState | lastIdleTime = 0 }
+                , delayedCmd = Just <| msgCmd msg
+            }
 
     else
         case msg of
@@ -652,23 +656,44 @@ update msg model =
 
                     ( mdl, cmd ) =
                         if AppState.accountIncomplete model.appState then
-                            ( model, Cmd.none )
+                            case model.delayedCmd of
+                                Nothing ->
+                                    ( model, Cmd.none )
+
+                                Just c ->
+                                    ( { model | delayedCmd = Just Cmd.none }
+                                    , c
+                                    )
 
                         else
                             case AppState.idle time model.appState of
                                 Nothing ->
-                                    case AppState.update time model.appState of
-                                        Nothing ->
-                                            ( model, Cmd.none )
-
-                                        Just ( appState, task ) ->
-                                            ( { model | appState = appState }
-                                            , Task.attempt ReceiveAppStateUpdates task
+                                    case model.delayedCmd of
+                                        Just c ->
+                                            ( { model | delayedCmd = Just Cmd.none }
+                                            , c
                                             )
+
+                                        Nothing ->
+                                            case AppState.update time model.appState of
+                                                Nothing ->
+                                                    ( { model
+                                                        | delayedCmd =
+                                                            Just Cmd.none
+                                                      }
+                                                    , Cmd.none
+                                                    )
+
+                                                Just ( appState, task ) ->
+                                                    ( { model | appState = appState }
+                                                    , Task.attempt ReceiveAppStateUpdates task
+                                                    )
 
                                 Just ( appState, task ) ->
                                     ( { model | appState = appState }
-                                    , Task.attempt ReceiveAppStateStore task
+                                    , Task.attempt
+                                        ReceiveAppStateStore
+                                        task
                                     )
                 in
                 ( { mdl | time = time }
