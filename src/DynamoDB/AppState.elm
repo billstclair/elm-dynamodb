@@ -20,6 +20,7 @@ module DynamoDB.AppState exposing
     ( AppState, makeAppState
     , Error, accountIncomplete, save, idle, isIdleTime
     , Updates, update, initialLoad
+    , maybeNotActive, goActive
     , renderAccount
     , store, mergeAccount
     )
@@ -36,6 +37,10 @@ Once a second, call `idle` to make sure unstored changes get pushed to DynamoDB,
 
 Call `update` to pull changes from DynamoDB, at `updatePeriod` intervals.
 
+Call `maybeNotActive` at `updateActive` intervals to make your app stop calling `update`, until the user does something to make it necessary.
+
+Call `goActive` when the user does something that requires pulling changes from other browsers.
+
 
 # State
 
@@ -50,6 +55,11 @@ Call `update` to pull changes from DynamoDB, at `updatePeriod` intervals.
 # Getting updates from other browsers.
 
 @docs Updates, update, initialLoad
+
+
+# Stop calling `update` periodically.
+
+@docs maybeNotActive, goActive
 
 
 # User Interface
@@ -87,6 +97,7 @@ type alias AppState =
     { account : Account
     , idlePeriod : Int
     , updatePeriod : Int
+    , activePeriod : Int
     , keyName : String
     , valueAttributeName : String
     , saveCountAttributeName : String
@@ -98,6 +109,7 @@ type alias AppState =
     , lastIdleTime : Int
     , lastUpdateTime : Int
     , saveCount : Int
+    , lastActiveTime : Int
     , updates : Dict String (Maybe Value)
     , keyCounts : Dict String Int
     }
@@ -110,6 +122,7 @@ makeAppState account =
     { account = account
     , idlePeriod = 2000
     , updatePeriod = 10000
+    , activePeriod = 5000
     , keyName = "key"
     , valueAttributeName = "value"
     , saveCountAttributeName = "saveCount"
@@ -121,6 +134,7 @@ makeAppState account =
     -- to the result of `Time.now`.
     , lastIdleTime = 0
     , lastUpdateTime = 0
+    , lastActiveTime = 0
     , saveCount = 0
     , updates = Dict.empty
     , keyCounts = Dict.empty
@@ -240,6 +254,25 @@ update time appState =
             ( { appState | lastUpdateTime = time }
             , initialLoad appState appState.saveCount appState.keyCounts
             )
+
+
+{-| Goes non-active if `activePeriod` has passed since `lastActiveTime`.
+Return True as first value if non-active.
+-}
+maybeNotActive : Int -> AppState -> ( Bool, AppState )
+maybeNotActive time appState =
+    if time < appState.lastActiveTime + appState.activePeriod then
+        ( False, appState )
+
+    else
+        ( True, { appState | lastActiveTime = time } )
+
+
+{-| Go active, usually due to UI action that requires update from afar.
+-}
+goActive : Int -> AppState -> AppState
+goActive time appState =
+    { appState | lastActiveTime = time }
 
 
 makeKey : AppState -> String -> Key
