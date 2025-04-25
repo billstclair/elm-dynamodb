@@ -20,7 +20,7 @@ module DynamoDB.AppState exposing
     ( AppState, makeAppState
     , Error, accountIncomplete, save, idle, isIdleTime
     , Updates, update, initialLoad
-    , maybeNotActive, goActive
+    , isActive, goActive
     , renderAccount
     , store, mergeAccount
     )
@@ -37,7 +37,7 @@ Once a second, call `idle` to make sure unstored changes get pushed to DynamoDB,
 
 Call `update` to pull changes from DynamoDB, at `updatePeriod` intervals.
 
-Call `maybeNotActive` at `updateActive` intervals to make your app stop calling `update`, until the user does something to make it necessary.
+Call `isActive` at `updateActive` intervals to make your app stop calling `update`, until the user does something to make it necessary.
 
 Call `goActive` when the user does something that requires pulling changes from other browsers.
 
@@ -59,7 +59,7 @@ Call `goActive` when the user does something that requires pulling changes from 
 
 # Stop calling `update` periodically.
 
-@docs maybeNotActive, goActive
+@docs isActive, goActive
 
 
 # User Interface
@@ -256,16 +256,11 @@ update time appState =
             )
 
 
-{-| Goes non-active if `activePeriod` has passed since `lastActiveTime`.
-Return True as first value if non-active.
+{-| Check for activity. Return True if active.
 -}
-maybeNotActive : Int -> AppState -> ( Bool, AppState )
-maybeNotActive time appState =
-    if time < appState.lastActiveTime + appState.activePeriod then
-        ( False, appState )
-
-    else
-        ( True, { appState | lastActiveTime = time } )
+isActive : Int -> AppState -> Bool
+isActive time appState =
+    time <= appState.lastActiveTime + appState.activePeriod
 
 
 {-| Go active, usually due to UI action that requires update from afar.
