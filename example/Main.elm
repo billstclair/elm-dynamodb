@@ -617,35 +617,45 @@ update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     let
         needDelay =
-            case msg of
-                SaveRow _ _ ->
-                    True
+            (not <| AppState.isActive model.time model.appState)
+                && (case msg of
+                        SaveRow _ _ ->
+                            True
 
-                SetSelection _ ->
-                    True
+                        SetSelection _ ->
+                            True
 
-                AddRow ->
-                    True
+                        AddRow ->
+                            True
 
-                RemoveRow ->
-                    True
+                        RemoveRow ->
+                            True
 
-                UpdateRow ->
-                    True
+                        UpdateRow ->
+                            True
 
-                _ ->
-                    False
+                        _ ->
+                            False
+                   )
     in
     if needDelay then
-        let
-            appState =
-                model.appState
-        in
-        update (Tick <| Time.millisToPosix model.time)
-            { model
-                | appState = { appState | lastIdleTime = 0 }
-                , delayedCmd = Just <| msgCmd msg
-            }
+        case model.delayedCmd of
+            Just _ ->
+                -- Should I keep a queue of delayed commands?
+                -- This just drops those on the floor until
+                -- the Amazon DB responds.
+                ( model, Cmd.none )
+
+            Nothing ->
+                let
+                    appState =
+                        model.appState
+                in
+                update (Tick <| Time.millisToPosix model.time)
+                    { model
+                        | appState = { appState | lastIdleTime = 0 }
+                        , delayedCmd = Just <| msgCmd msg
+                    }
 
     else
         case msg of
@@ -654,40 +664,31 @@ update msg model =
                     time =
                         Time.posixToMillis posix
 
+                    useDelayedCmd m =
+                        case m.delayedCmd of
+                            Nothing ->
+                                ( m, Cmd.none )
+
+                            Just c ->
+                                ( { m | delayedCmd = Nothing }
+                                , c
+                                )
+
                     ( mdl, cmd ) =
                         if AppState.accountIncomplete model.appState then
-                            case model.delayedCmd of
-                                Nothing ->
-                                    ( model, Cmd.none )
-
-                                Just c ->
-                                    ( { model | delayedCmd = Just Cmd.none }
-                                    , c
-                                    )
+                            useDelayedCmd model
 
                         else
                             case AppState.idle time model.appState of
                                 Nothing ->
-                                    case model.delayedCmd of
-                                        Just c ->
-                                            ( { model | delayedCmd = Just Cmd.none }
-                                            , c
-                                            )
-
+                                    case AppState.update time model.appState of
                                         Nothing ->
-                                            case AppState.update time model.appState of
-                                                Nothing ->
-                                                    ( { model
-                                                        | delayedCmd =
-                                                            Just Cmd.none
-                                                      }
-                                                    , Cmd.none
-                                                    )
+                                            useDelayedCmd model
 
-                                                Just ( appState, task ) ->
-                                                    ( { model | appState = appState }
-                                                    , Task.attempt ReceiveAppStateUpdates task
-                                                    )
+                                        Just ( appState, task ) ->
+                                            ( { model | appState = appState }
+                                            , Task.attempt ReceiveAppStateUpdates task
+                                            )
 
                                 Just ( appState, task ) ->
                                     ( { model | appState = appState }
@@ -704,22 +705,31 @@ update msg model =
                 ( model, msgCmd msg2 )
 
             ReceiveAppStateUpdates result ->
+                let
+                    ( mdl, cmd ) =
+                        case model.delayedCmd of
+                            Nothing ->
+                                ( model, Cmd.none )
+
+                            Just c ->
+                                ( { model | delayedCmd = Nothing }, c )
+                in
                 case result of
                     Err err ->
-                        ( { model
+                        ( { mdl
                             | display =
                                 "ReceiveAppStateUpdates: " ++ Debug.toString err
                           }
-                        , Cmd.none
+                        , cmd
                         )
 
                     Ok Nothing ->
-                        ( model, Cmd.none )
+                        ( mdl, cmd )
 
                     Ok (Just updates) ->
                         let
                             appState =
-                                model.appState
+                                mdl.appState
 
                             folder k mv rowsTail =
                                 case mv of
@@ -741,12 +751,12 @@ update msg model =
                                                 Nothing
                                                     == Dict.get k updates.updates
                                     )
-                                    model.rows
+                                    mdl.rows
 
                             rows =
                                 Dict.foldr folder oldRows updates.updates
                         in
-                        ( { model
+                        ( { mdl
                             | display =
                                 if model.appState.saveCount == 0 then
                                     "InitialLoad received."
@@ -760,7 +770,7 @@ update msg model =
                                 }
                             , rows = sortRows rows
                           }
-                        , Cmd.none
+                        , cmd
                         )
 
             ReceiveAppStateStore result ->
