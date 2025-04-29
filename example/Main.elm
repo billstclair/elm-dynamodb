@@ -2,7 +2,7 @@
 --
 -- Main.elm
 -- Example of using the DynamoDB module.
--- Copyright (c) 2022 Bill St. Clair <billstclair@gmail.com>
+-- Copyright (c) 2022-2025 Bill St. Clair <billstclair@gmail.com>
 -- Some rights reserved.
 -- Distributed under the MIT License
 -- See LICENSE.txt
@@ -649,10 +649,15 @@ update msg model =
             Nothing ->
                 let
                     appState =
-                        model.appState
+                        AppState.goActive model.time model.appState
+
+                    mdl =
+                        { model
+                            | appState = appState
+                        }
                 in
                 update (Tick <| Time.millisToPosix model.time)
-                    { model
+                    { mdl
                         | appState = { appState | lastIdleTime = 0 }
                         , delayedCmd = Just <| msgCmd msg
                     }
@@ -676,6 +681,9 @@ update msg model =
 
                     ( mdl, cmd ) =
                         if AppState.accountIncomplete model.appState then
+                            useDelayedCmd model
+
+                        else if not <| AppState.isActive time model.appState then
                             useDelayedCmd model
 
                         else
