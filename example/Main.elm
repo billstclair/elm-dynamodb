@@ -116,6 +116,7 @@ type alias Model =
 
 type Msg
     = Tick Posix
+    | InitAppState Posix
     | Delay Msg
     | ReceiveAppStateUpdates (Result AppState.Error (Maybe Updates))
     | ReceiveAppStateStore (Result AppState.Error Int)
@@ -206,7 +207,10 @@ init _ =
       , transactIncrement = "1"
       , metadata = Nothing
       }
-    , Task.attempt ReceiveAccounts (DynamoDB.readAccounts Nothing)
+    , Cmd.batch
+        [ Task.attempt ReceiveAccounts (DynamoDB.readAccounts Nothing)
+        , Task.perform InitAppState Time.now
+        ]
     )
 
 
@@ -664,6 +668,14 @@ update msg model =
 
     else
         case msg of
+            InitAppState posix ->
+                ( { model
+                    | appState =
+                        AppState.goActive (Time.posixToMillis posix) model.appState
+                  }
+                , Cmd.none
+                )
+
             Tick posix ->
                 let
                     time =
@@ -683,20 +695,21 @@ update msg model =
                         if AppState.accountIncomplete model.appState then
                             useDelayedCmd model
 
-                        else if not <| AppState.isActive time model.appState then
-                            useDelayedCmd model
-
                         else
                             case AppState.idle time model.appState of
                                 Nothing ->
-                                    case AppState.update time model.appState of
-                                        Nothing ->
-                                            useDelayedCmd model
+                                    if not <| AppState.isActive time model.appState then
+                                        useDelayedCmd model
 
-                                        Just ( appState, task ) ->
-                                            ( { model | appState = appState }
-                                            , Task.attempt ReceiveAppStateUpdates task
-                                            )
+                                    else
+                                        case AppState.update time model.appState of
+                                            Nothing ->
+                                                useDelayedCmd model
+
+                                            Just ( appState, task ) ->
+                                                ( { model | appState = appState }
+                                                , Task.attempt ReceiveAppStateUpdates task
+                                                )
 
                                 Just ( appState, task ) ->
                                     ( { model | appState = appState }

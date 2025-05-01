@@ -134,7 +134,7 @@ makeAppState account =
     -- to the result of `Time.now`.
     , lastIdleTime = 0
     , lastUpdateTime = 0
-    , lastActiveTime = 0
+    , lastActiveTime = -1 --active by deafult
     , saveCount = 0
     , updates = Dict.empty
     , keyCounts = Dict.empty
@@ -260,7 +260,8 @@ update time appState =
 -}
 isActive : Int -> AppState -> Bool
 isActive time appState =
-    time <= appState.lastActiveTime + appState.activePeriod
+    (appState.lastActiveTime == -1)
+        || (time <= appState.lastActiveTime + appState.activePeriod)
 
 
 {-| Go active, usually due to UI action that requires update from afar.
