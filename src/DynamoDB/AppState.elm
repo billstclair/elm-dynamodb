@@ -1,8 +1,8 @@
 ----------------------------------------------------------------------
 --
 -- DynamoDB/AppState.elm
--- Help for storing application state in DynanoDB.
--- Copyright (c) 2022-2025 Bill St. Clair <billstclair@gmail.com>
+-- Help for storing application state in DynamoDB.
+-- Copyright (c) 2022-2026 Bill St. Clair <billstclair@gmail.com>
 -- Some rights reserved.
 -- Distributed under the MIT License
 -- See LICENSE.txt
@@ -21,7 +21,7 @@ module DynamoDB.AppState exposing
     , Error, accountIncomplete, save, idle, isIdleTime
     , Updates, update, initialLoad
     , isActive, goActive
-    , renderAccount
+    , emptyAccount, renderAccount
     , store, mergeAccount
     )
 
@@ -64,7 +64,7 @@ Call `goActive` when the user does something that requires pulling changes from 
 
 # User Interface
 
-@docs renderAccount
+@docs emptyAccount, renderAccount
 
 
 # Internals
@@ -613,6 +613,18 @@ b string =
 br : Html msg
 br =
     Html.br [] []
+
+
+{-| An empty `DynamoDB.Account`.
+-}
+emptyAccount : Account
+emptyAccount =
+    { name = "<empty>"
+    , region = Nothing
+    , accessKey = ""
+    , secretKey = ""
+    , tableName = ""
+    }
 
 
 {-| A UI for entering account information.
